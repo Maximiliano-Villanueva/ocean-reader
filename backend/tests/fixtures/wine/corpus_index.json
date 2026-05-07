@@ -1,0 +1,125 @@
+{
+  "schema": "schema.json",
+  "rows": [
+    {
+      "id": "row_000",
+      "csv_row_index": 0,
+      "clean_pdf": "clean/row_000_clean.pdf",
+      "clean_truth": "clean/row_000_clean.json",
+      "noisy_pdf": "noisy/row_000_noisy.pdf",
+      "noisy_truth": "noisy/row_000_noisy.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "row_001",
+      "csv_row_index": 1,
+      "clean_pdf": "clean/row_001_clean.pdf",
+      "clean_truth": "clean/row_001_clean.json",
+      "noisy_pdf": "noisy/row_001_noisy.pdf",
+      "noisy_truth": "noisy/row_001_noisy.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "row_002",
+      "csv_row_index": 2,
+      "clean_pdf": "clean/row_002_clean.pdf",
+      "clean_truth": "clean/row_002_clean.json",
+      "noisy_pdf": "noisy/row_002_noisy.pdf",
+      "noisy_truth": "noisy/row_002_noisy.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "row_003",
+      "csv_row_index": 3,
+      "clean_pdf": "clean/row_003_clean.pdf",
+      "clean_truth": "clean/row_003_clean.json",
+      "noisy_pdf": "noisy/row_003_noisy.pdf",
+      "noisy_truth": "noisy/row_003_noisy.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "row_004",
+      "csv_row_index": 4,
+      "clean_pdf": "clean/row_004_clean.pdf",
+      "clean_truth": "clean/row_004_clean.json",
+      "noisy_pdf": "noisy/row_004_noisy.pdf",
+      "noisy_truth": "noisy/row_004_noisy.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "row_005",
+      "csv_row_index": 5,
+      "clean_pdf": "clean/row_005_clean.pdf",
+      "clean_truth": "clean/row_005_clean.json",
+      "noisy_pdf": "noisy/row_005_noisy.pdf",
+      "noisy_truth": "noisy/row_005_noisy.json",
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "row_006",
+      "csv_row_index": 6,
+      "clean_pdf": "clean/row_006_clean.pdf",
+      "clean_truth": "clean/row_006_clean.json",
+      "noisy_pdf": "noisy/row_006_noisy.pdf",
+      "noisy_truth": "noisy/row_006_noisy.json",
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "row_007",
+      "csv_row_index": 7,
+      "clean_pdf": "clean/row_007_clean.pdf",
+      "clean_truth": "clean/row_007_clean.json",
+      "noisy_pdf": "noisy/row_007_noisy.pdf",
+      "noisy_truth": "noisy/row_007_noisy.json",
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "row_008",
+      "csv_row_index": 8,
+      "clean_pdf": "clean/row_008_clean.pdf",
+      "clean_truth": "clean/row_008_clean.json",
+      "noisy_pdf": "noisy/row_008_noisy.pdf",
+      "noisy_truth": "noisy/row_008_noisy.json",
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "quality",
+          "rule": "required"
+        }
+      ]
+    },
+    {
+      "id": "row_009",
+      "csv_row_index": 9,
+      "clean_pdf": "clean/row_009_clean.pdf",
+      "clean_truth": "clean/row_009_clean.json",
+      "noisy_pdf": "noisy/row_009_noisy.pdf",
+      "noisy_truth": "noisy/row_009_noisy.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+global:
+  checkNewVersion: false
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+api:
+  dashboard: false
+
+log:
+  level: INFO
+
+ping:
+  entryPoint: web

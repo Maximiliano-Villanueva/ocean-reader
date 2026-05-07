@@ -1,0 +1,88 @@
+# Edge routing — same path split expected in cloud: /api → FastAPI; /openapi.json, /docs, /redoc → FastAPI;
+# UI on /. Host list matches local/dev and in-compose DNS alias gateway.ocean-read.internal.
+#
+# For a public FQDN, add another dynamic file next to this one (tracked or generated in CI)
+# whose routers reuse the same middlewares/services with Host(`your.app.example`). Traefik merges
+# files under this directory.
+
+http:
+  serversTransports:
+    backend-sse:
+      forwardingTimeouts:
+        dialTimeout: 30s
+        responseHeaderTimeout: 7200s
+        idleConnTimeout: 7200s
+
+  middlewares:
+    edge-auth:
+      forwardAuth:
+        address: "http://gateway-auth:9100/auth"
+        trustForwardHeader: true
+    ratelimit-api:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1s
+    sec-headers:
+      headers:
+        browserXSSFilter: true
+        contentTypeNosniff: true
+        customFrameOptionsValue: "SAMEORIGIN"
+
+  routers:
+    api-chat-stream:
+      entryPoints:
+        - web
+      rule: >-
+        HostRegexp(`^(ocean-read\.local|localhost|127\.0\.0\.1|gateway\.ocean-read\.internal|traefik)$`)
+        && PathRegexp(`^/api/sessions/[^/]+/chat/stream$`)
+      priority: 25
+      service: svc-backend
+      middlewares:
+        - edge-auth
+        - sec-headers
+    api-docs:
+      entryPoints:
+        - web
+      rule: >-
+        HostRegexp(`^(ocean-read\.local|localhost|127\.0\.0\.1|gateway\.ocean-read\.internal|traefik)$`)
+        && (PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/redoc`))
+      priority: 15
+      service: svc-backend
+      middlewares:
+        - edge-auth
+        - sec-headers
+    api:
+      entryPoints:
+        - web
+      rule: >-
+        HostRegexp(`^(ocean-read\.local|localhost|127\.0\.0\.1|gateway\.ocean-read\.internal|traefik)$`)
+        && PathPrefix(`/api`)
+      priority: 10
+      service: svc-backend
+      middlewares:
+        - edge-auth
+        - ratelimit-api
+        - sec-headers
+    ui:
+      entryPoints:
+        - web
+      rule: >-
+        HostRegexp(`^(ocean-read\.local|localhost|127\.0\.0\.1|gateway\.ocean-read\.internal|traefik)$`)
+      priority: 1
+      middlewares:
+        - sec-headers
+      service: svc-frontend
+
+  services:
+    svc-backend:
+      loadBalancer:
+        serversTransport: backend-sse
+        responseForwarding:
+          flushInterval: 1ms
+        servers:
+          - url: "http://backend:8000"
+    svc-frontend:
+      loadBalancer:
+        servers:
+          - url: "http://frontend:80"

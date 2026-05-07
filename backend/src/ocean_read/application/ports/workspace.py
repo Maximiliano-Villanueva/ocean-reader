@@ -1,0 +1,16 @@
+"""Application port: project persistence."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Protocol
+
+from ocean_read.db.models import Project
+
+
+class WorkspaceRepository(Protocol):
+    async def get_project(self, project_id: uuid.UUID) -> Project | None: ...
+    async def list_projects(self) -> list[Project]: ...
+    async def add_project(self, project: Project) -> None: ...
+    async def delete_project_entity(self, project: Project) -> None: ...
+    async def commit_refresh(self, *entities: object) -> None: ...

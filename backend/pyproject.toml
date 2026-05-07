@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocean-read"
+version = "0.1.0"
+description = "Ocean Read — schema-driven document validation backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "asyncpg>=0.30.0",
+  "psycopg2-binary>=2.9.9",
+  "alembic>=1.14.0",
+  "pgvector>=0.3.6",
+  "pydantic-settings>=2.6.0",
+  "httpx>=0.28.0",
+  "python-multipart>=0.0.12",
+  "docker>=7.0.0",
+  "pillow>=10.0.0",
+  "pymupdf>=1.24.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

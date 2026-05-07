@@ -1,0 +1,13 @@
+ocean-read.internal:53 {
+    file /zones/ocean.db ocean-read.internal
+    log
+    errors
+}
+
+.:53 {
+    forward . 127.0.0.11 {
+        except ocean-read.internal
+    }
+    log
+    errors
+}

@@ -1,0 +1,26 @@
+{
+  "fields": {
+    "ph": {
+      "type": "number",
+      "required": true,
+      "min": 2.5,
+      "max": 4.5,
+      "aliases": ["pH", "Measured pH", "pH level", "ph value"]
+    },
+    "alcohol": {
+      "type": "number",
+      "required": true,
+      "min": 8.0,
+      "max": 15.0,
+      "aliases": ["Alcohol", "Alcohol %", "Alcohol content", "EtOH", "Alc."]
+    },
+    "quality": {
+      "type": "number",
+      "required": true,
+      "min": 0,
+      "max": 10,
+      "aliases": ["Quality", "Quality score", "Panel rating"]
+    }
+  },
+  "rules": ["required", "range_validation", "type_check"]
+}

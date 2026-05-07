@@ -1,0 +1,261 @@
+name: ocean-read
+
+networks:
+  edge:
+
+volumes:
+  ocean_pgdata:
+  ocean_uploads:
+  ocean_pgadmin:
+  airflow-db-data:
+
+services:
+  traefik:
+    image: traefik:v3.2
+    ports:
+      - "${GATEWAY_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./infra/traefik/dynamic:/etc/traefik/dynamic:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+      gateway-auth:
+        condition: service_started
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1/ping >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    networks:
+      edge:
+        aliases:
+          - gateway.ocean-read.internal
+
+  gateway-auth:
+    build:
+      context: ./infra/gateway-auth
+      dockerfile: Dockerfile
+    environment:
+      EDGE_AUTH_ENABLED: ${EDGE_AUTH_ENABLED:-false}
+      EDGE_API_TOKEN: ${EDGE_API_TOKEN:-}
+    expose:
+      - "9100"
+    networks:
+      edge: {}
+
+  coredns:
+    image: alpine:3.19
+    command:
+      - sh
+      - -c
+      - |
+          set -e
+          apk add --no-cache coredns >/dev/null
+          for i in $$(seq 1 60); do
+            IP=$$(getent hosts traefik | awk '{print $$1; exit}')
+            [ -n "$$IP" ] && break
+            sleep 1
+          done
+          [ -n "$$IP" ] || exit 1
+          mkdir -p /zones
+          printf '%s\n'\
+            '$$ORIGIN ocean-read.internal.'\
+            '@   3600 IN SOA ns.ocean-read.internal. hostmaster 1 3600 1800 604800 60'\
+            "gateway IN A $$IP"\
+            > /zones/ocean.db
+          exec coredns -conf /Corefile
+    volumes:
+      - ./infra/coredns/Corefile:/Corefile:ro
+    ports:
+      - "127.0.0.1:${COREDNS_UDP_PORT:-55353}:53/udp"
+    depends_on:
+      traefik:
+        condition: service_healthy
+    networks:
+      edge: {}
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ocean}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ocean}
+      POSTGRES_DB: ${POSTGRES_DB:-ocean_read}
+    ports:
+      # Default 15432 avoids clashing with a host Postgres on 5432; containers use db:5432 regardless.
+      - "${POSTGRES_PUBLISH:-15432}:5432"
+    volumes:
+      - ocean_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ocean} -d ${POSTGRES_DB:-ocean_read}"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    networks:
+      edge: {}
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@ocean-read.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-ocean}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "127.0.0.1:${PGADMIN_PUBLISH:-5050}:80"
+    volumes:
+      - ocean_pgadmin:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      edge: {}
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://ocean:ocean@db:5432/ocean_read}
+      UPLOAD_ROOT: /data/uploads
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-gemma4:e4b}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
+      VALIDATION_LLM_FALLBACK_ENABLED: ${VALIDATION_LLM_FALLBACK_ENABLED:-false}
+      LOG_VIEWER_ENABLED: ${LOG_VIEWER_ENABLED:-true}
+      LOG_VIEWER_TOKEN: ${LOG_VIEWER_TOKEN:-}
+      COMPOSE_PROJECT_NAME: ocean-read
+    expose:
+      - "8000"
+    volumes:
+      - ocean_uploads:/data/uploads
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8000/api/health'', timeout=3)"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    networks:
+      edge: {}
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_EDGE_API_TOKEN: ${EDGE_API_TOKEN:-}
+        VITE_LOG_VIEWER_TOKEN: ${LOG_VIEWER_TOKEN:-}
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    networks:
+      edge: {}
+
+  # --- Optional Apache Airflow (LocalExecutor): ``docker compose --profile airflow up -d``
+  # UI: http://127.0.0.1:8794 — see infra/airflow/README.md
+  airflow-postgres:
+    image: postgres:16
+    profiles: ["airflow"]
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+    networks:
+      edge: {}
+
+  airflow-init:
+    image: apache/airflow:2.10.5
+    profiles: ["airflow"]
+    networks:
+      edge: {}
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW_WWW_USERNAME: ${AIRFLOW_WWW_USERNAME:-airflow}
+      AIRFLOW_WWW_PASSWORD: ${AIRFLOW_WWW_PASSWORD:-airflow}
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        airflow users create \
+          --username "$$AIRFLOW_WWW_USERNAME" \
+          --password "$$AIRFLOW_WWW_PASSWORD" \
+          --firstname Ocean --lastname Admin --role Admin --email airflow@local \
+          || true
+    restart: "no"
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.5
+    profiles: ["airflow"]
+    networks:
+      edge: {}
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      INTERNAL_JOB_TOKEN: ${INTERNAL_JOB_TOKEN:-}
+      OCEAN_BACKEND_INTERNAL_URL: http://backend:8000
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+      airflow-postgres:
+        condition: service_healthy
+    command: scheduler
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+    restart: unless-stopped
+
+  airflow-webserver:
+    image: apache/airflow:2.10.5
+    profiles: ["airflow"]
+    networks:
+      edge: {}
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW_WWW_USERNAME: ${AIRFLOW_WWW_USERNAME:-airflow}
+      AIRFLOW_WWW_PASSWORD: ${AIRFLOW_WWW_PASSWORD:-airflow}
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${AIRFLOW_UI_PORT:-8794}:8080"
+    command: webserver
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+    restart: unless-stopped
