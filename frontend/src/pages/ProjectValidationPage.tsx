@@ -4,9 +4,15 @@ import { Link, useParams } from "react-router-dom";
 import {
   api,
   type ValidateDocumentResponse,
-  type ValidationFieldErrorOut,
   type ValidationSchemaGroupOut,
 } from "../api";
+import PdfEvidenceViewer from "../components/pdf/PdfEvidenceViewer";
+import {
+  highlightsFromPipelineSnapshot,
+  highlightsFromReport,
+  mergeHighlights,
+  type PdfHighlight,
+} from "../lib/evidenceHighlights";
 
 function isPdfFile(f: File): boolean {
   const lower = f.name.toLowerCase();
@@ -35,13 +41,14 @@ export default function ProjectValidationPage() {
   const [version, setVersion] = useState("");
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [schemaLoadError, setSchemaLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [candidateHighlights, setCandidateHighlights] = useState<PdfHighlight[]>([]);
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
 
   useEffect(() => {
     setSchemaKey("");
@@ -84,17 +91,6 @@ export default function ProjectValidationPage() {
   }, [groups, schemaKey]);
 
   const activeEntry = useMemo(() => queue.find((q) => q.key === activeKey) ?? null, [queue, activeKey]);
-
-  useEffect(() => {
-    const f = activeEntry?.file;
-    if (!f) {
-      setPreviewUrl(null);
-      return;
-    }
-    const u = URL.createObjectURL(f);
-    setPreviewUrl(u);
-    return () => URL.revokeObjectURL(u);
-  }, [activeEntry?.file, activeEntry?.key]);
 
   const versionsForKey = useMemo(
     () => groups.find((g) => g.schema_key === schemaKey)?.versions ?? [],
@@ -220,18 +216,32 @@ export default function ProjectValidationPage() {
     }
   }
 
-  function highlightPage(err: ValidationFieldErrorOut): number | null {
-    const p = err.evidence?.page;
-    return typeof p === "number" && p > 0 ? p : null;
-  }
-
   const result = activeEntry?.result;
-  const iframeSrc =
-    previewUrl && (result?.results?.length || result?.ambiguous_fields?.length)
-      ? `${previewUrl}#page=${result.results?.length ? (highlightPage(result.results[0]) ?? 1) : 1}`
-      : previewUrl
-        ? `${previewUrl}#page=1`
-        : null;
+
+  useEffect(() => {
+    const runId = result?.run_id;
+    if (!projectId || !runId) {
+      setCandidateHighlights([]);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      api.validation.fetchRunCandidates(projectId, runId),
+      api.validation.fetchRunBlocks(projectId, runId),
+    ]).then(([cands, blocks]) => {
+      if (!cancelled && result) {
+        setCandidateHighlights(highlightsFromPipelineSnapshot(result, cands, blocks));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, result]);
+
+  const pdfHighlights = useMemo(() => {
+    if (!result) return [] as PdfHighlight[];
+    return mergeHighlights(highlightsFromReport(result), candidateHighlights);
+  }, [result, candidateHighlights]);
 
   return (
     <div className="page project-route-page validation-page">
@@ -408,22 +418,36 @@ export default function ProjectValidationPage() {
                           </span>
                         </div>
                         {r.evidence && (
-                          <dl className="evidence-dl">
-                            <dt>Evidence text</dt>
-                            <dd>
-                              <pre className="evidence-snippet">{r.evidence.text || "—"}</pre>
-                            </dd>
-                            <dt>Block / page</dt>
-                            <dd>
-                              <code>{r.evidence.block_id || "—"}</code> · page {r.evidence.page}
-                              {r.evidence.bbox && r.evidence.bbox.length >= 4 ? (
-                                <>
-                                  {" "}
-                                  · bbox [{r.evidence.bbox.map((n) => n.toFixed(1)).join(", ")}]
-                                </>
-                              ) : null}
-                            </dd>
-                          </dl>
+                          <>
+                            <button
+                              type="button"
+                              className="evidence-jump-btn evidence-jump-btn--inline"
+                              onClick={() => {
+                                const hit = pdfHighlights.find(
+                                  (h) => h.field === r.field && h.rule === r.rule,
+                                );
+                                if (hit) setActiveHighlightId(hit.id);
+                              }}
+                            >
+                              Show on PDF
+                            </button>
+                            <dl className="evidence-dl">
+                              <dt>Evidence text</dt>
+                              <dd>
+                                <pre className="evidence-snippet">{r.evidence.text || "—"}</pre>
+                              </dd>
+                              <dt>Block / page</dt>
+                              <dd>
+                                <code>{r.evidence.block_id || "—"}</code> · page {r.evidence.page}
+                                {r.evidence.bbox && r.evidence.bbox.length >= 4 ? (
+                                  <>
+                                    {" "}
+                                    · bbox [{r.evidence.bbox.map((n) => n.toFixed(1)).join(", ")}]
+                                  </>
+                                ) : null}
+                              </dd>
+                            </dl>
+                          </>
                         )}
                       </li>
                     ))}
@@ -435,8 +459,13 @@ export default function ProjectValidationPage() {
             ) : null}
           </div>
           <aside className="validation-pdf-pane" aria-label="PDF preview">
-            {iframeSrc ? (
-              <iframe title={`PDF preview: ${activeEntry.file.name}`} src={iframeSrc} className="pdf-frame" />
+            {activeEntry ? (
+              <PdfEvidenceViewer
+                file={activeEntry.file}
+                highlights={pdfHighlights}
+                activeHighlightId={activeHighlightId}
+                onHighlightClick={(h) => setActiveHighlightId(h.id)}
+              />
             ) : (
               <p className="muted">Select a queued file to preview.</p>
             )}

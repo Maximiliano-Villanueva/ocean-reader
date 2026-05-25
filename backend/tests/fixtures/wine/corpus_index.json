@@ -120,6 +120,233 @@
       "noisy_truth": "noisy/row_009_noisy.json",
       "expected_status": "PASS",
       "expected_errors": []
+    },
+    {
+      "id": "syn_fs_alcohol_high",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_schema/syn_fs_alcohol_high.pdf",
+      "clean_truth": "fail_schema/syn_fs_alcohol_high.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "syn_fs_ph_high",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_schema/syn_fs_ph_high.pdf",
+      "clean_truth": "fail_schema/syn_fs_ph_high.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "ph",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "syn_fs_quality_high",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_schema/syn_fs_quality_high.pdf",
+      "clean_truth": "fail_schema/syn_fs_quality_high.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "quality",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "syn_fs_alcohol_low",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_schema/syn_fs_alcohol_low.pdf",
+      "clean_truth": "fail_schema/syn_fs_alcohol_low.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "syn_fs_ph_low",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_schema/syn_fs_ph_low.pdf",
+      "clean_truth": "fail_schema/syn_fs_ph_low.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "ph",
+          "rule": "range_validation"
+        }
+      ]
+    },
+    {
+      "id": "syn_fm_no_quality",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_missing/syn_fm_no_quality.pdf",
+      "clean_truth": "fail_missing/syn_fm_no_quality.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "quality",
+          "rule": "required"
+        }
+      ]
+    },
+    {
+      "id": "syn_fm_no_ph",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_missing/syn_fm_no_ph.pdf",
+      "clean_truth": "fail_missing/syn_fm_no_ph.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "ph",
+          "rule": "required"
+        }
+      ]
+    },
+    {
+      "id": "syn_fm_no_alcohol",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_missing/syn_fm_no_alcohol.pdf",
+      "clean_truth": "fail_missing/syn_fm_no_alcohol.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "required"
+        }
+      ]
+    },
+    {
+      "id": "syn_fm_only_quality",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_missing/syn_fm_only_quality.pdf",
+      "clean_truth": "fail_missing/syn_fm_only_quality.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "ph",
+          "rule": "required"
+        },
+        {
+          "field": "alcohol",
+          "rule": "required"
+        }
+      ]
+    },
+    {
+      "id": "syn_fm_header_only",
+      "csv_row_index": -1,
+      "clean_pdf": "fail_missing/syn_fm_header_only.pdf",
+      "clean_truth": "fail_missing/syn_fm_header_only.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "ph",
+          "rule": "required"
+        },
+        {
+          "field": "alcohol",
+          "rule": "required"
+        },
+        {
+          "field": "quality",
+          "rule": "required"
+        }
+      ]
+    },
+    {
+      "id": "syn_amb_ph_dup",
+      "csv_row_index": -1,
+      "clean_pdf": "ambiguous/syn_amb_ph_dup.pdf",
+      "clean_truth": "ambiguous/syn_amb_ph_dup.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "AMBIGUOUS",
+      "expected_errors": [],
+      "expected_ambiguous_fields": [
+        "ph"
+      ]
+    },
+    {
+      "id": "syn_amb_alcohol_dup",
+      "csv_row_index": -1,
+      "clean_pdf": "ambiguous/syn_amb_alcohol_dup.pdf",
+      "clean_truth": "ambiguous/syn_amb_alcohol_dup.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "AMBIGUOUS",
+      "expected_errors": [],
+      "expected_ambiguous_fields": [
+        "alcohol"
+      ]
+    },
+    {
+      "id": "syn_amb_quality_dup",
+      "csv_row_index": -1,
+      "clean_pdf": "ambiguous/syn_amb_quality_dup.pdf",
+      "clean_truth": "ambiguous/syn_amb_quality_dup.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "AMBIGUOUS",
+      "expected_errors": [],
+      "expected_ambiguous_fields": [
+        "quality"
+      ]
+    },
+    {
+      "id": "syn_amb_ph_triple",
+      "csv_row_index": -1,
+      "clean_pdf": "ambiguous/syn_amb_ph_triple.pdf",
+      "clean_truth": "ambiguous/syn_amb_ph_triple.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "AMBIGUOUS",
+      "expected_errors": [],
+      "expected_ambiguous_fields": [
+        "ph"
+      ]
+    },
+    {
+      "id": "syn_amb_alcohol_regex_vs_layout",
+      "csv_row_index": -1,
+      "clean_pdf": "ambiguous/syn_amb_alcohol_regex_vs_layout.pdf",
+      "clean_truth": "ambiguous/syn_amb_alcohol_regex_vs_layout.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "AMBIGUOUS",
+      "expected_errors": [],
+      "expected_ambiguous_fields": [
+        "alcohol"
+      ]
     }
   ]
 }

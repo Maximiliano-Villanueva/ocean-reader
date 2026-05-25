@@ -100,7 +100,17 @@ Mount **`src`** so the container sees your working tree (the image alone may be 
 
 Details and layout: [TESTING.md](TESTING.md).
 
+**Database URL in Compose:** the **`backend`** service sets **`DATABASE_URL`** to **`postgresql+asyncpg://…@db:5432/…`** using **`POSTGRES_*`** from `docker-compose.yml`. A host-only **`DATABASE_URL`** in `.env` (for example **`127.0.0.1:15432`**) is **not** passed into the container, so Alembic and the API always reach the Compose **`db`** service.
+
 ## Verification (after healthy)
+
+**Validation + M2 audit (PDF hash, snapshot sub-resources, list filter):**
+
+```bash
+./scripts/verify_docker_validation_e2e.sh
+```
+
+Uses **`GATEWAY_HTTP_PORT`** (and edge auth headers when enabled). Requires **`backend/.venv`** with PyMuPDF to generate a tiny PDF on the host, or set **`OCEAN_VERIFY_PYTHON`** to a Python that has **`fitz`**.
 
 **Edge (canonical):**
 

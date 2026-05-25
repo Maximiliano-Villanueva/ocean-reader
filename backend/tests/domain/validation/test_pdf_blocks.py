@@ -82,3 +82,51 @@ def test_tc_unit_005_image_blocks_skipped() -> None:
     doc.close()
     blocks = parse_pdf_blocks(data)
     assert blocks and "pH" in blocks[-1].text
+
+
+def test_parse_pdf_span_blocks_ids_and_count() -> None:
+    """Span parser yields ``s*`` ids; typically more entries than merged layout blocks."""
+
+    import fitz
+
+    from ocean_read.domain.validation.pdf_blocks import parse_pdf_span_blocks
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 100), "Alpha")
+    page.insert_text((130, 100), "Beta")
+    data = doc.tobytes()
+    doc.close()
+    layout = parse_pdf_blocks(data)
+    spans = parse_pdf_span_blocks(data)
+    assert spans and all(s.id.startswith("s") for s in spans)
+    assert len(spans) >= len(layout)
+
+
+def test_choose_blocks_for_m3_groups_table_vs_list() -> None:
+    """Explicit ``table`` → span blocks; ``list`` group present → keep layout."""
+
+    import fitz
+
+    from ocean_read.domain.validation.pdf_blocks import choose_blocks_for_m3_groups
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Line")
+    data = doc.tobytes()
+    doc.close()
+    layout = parse_pdf_blocks(data)
+    body_table = {"version": "2", "groups": {"g": {"section_hint": "x", "structure_hint": "table", "row_fields": {}}}}
+    body_list = {"version": "2", "groups": {"g": {"section_hint": "x", "structure_hint": "list", "row_fields": {}}}}
+    body_mixed = {
+        "version": "2",
+        "groups": {
+            "a": {"section_hint": "x", "structure_hint": "list", "row_fields": {}},
+            "b": {"section_hint": "y", "structure_hint": "table", "row_fields": {}},
+        },
+    }
+    body_sections = {
+        "version": "2",
+        "groups": {"g": {"section_hint": "x", "structure_hint": "sections", "row_fields": {"a": {"type": "string"}}}},
+    }
+    assert choose_blocks_for_m3_groups(body_sections, data, layout) == layout

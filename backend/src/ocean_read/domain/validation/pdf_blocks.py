@@ -1,9 +1,14 @@
-"""PyMuPDF-based PDF parsing into stable text blocks with geometry for evidence."""
+"""PyMuPDF-based PDF parsing into stable text blocks with geometry for evidence.
+
+Includes merged **layout** blocks (``parse_pdf_blocks``) and optional **span-level**
+blocks (``parse_pdf_span_blocks``) for bbox-aware table row clustering in M3.
+"""
 
 from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -98,3 +103,77 @@ def parse_pdf_blocks(data: bytes) -> list[TextBlock]:
     finally:
         doc.close()
     return infer_section_labels(raw)
+
+
+def parse_pdf_span_blocks(data: bytes) -> list[TextBlock]:
+    """One ``TextBlock`` per PDF text span (finer geometry than merged layout blocks).
+
+    Stable ids ``s{n}`` in document order. Use with ``structure_hint: "table"`` group
+    extraction when columns align by horizontal gaps rather than ``|`` or single-line whitespace.
+    """
+
+    import fitz  # PyMuPDF — lazy import keeps tests import-light when mocked
+
+    doc = fitz.open(stream=data, filetype="pdf")
+    raw: list[TextBlock] = []
+    global_idx = 0
+    try:
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            page_num = page_idx + 1
+            d = page.get_text("dict")
+            for block in d.get("blocks") or []:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines") or []:
+                    for span in line.get("spans") or []:
+                        t = str(span.get("text") or "").strip()
+                        if not t:
+                            continue
+                        bbox_raw = span.get("bbox") or (0.0, 0.0, 0.0, 0.0)
+                        bbox = tuple(float(x) for x in bbox_raw)
+                        sz = span.get("size")
+                        fmax = float(sz) if isinstance(sz, (int, float)) else None
+                        sid = f"s{global_idx}"
+                        global_idx += 1
+                        raw.append(
+                            TextBlock(
+                                id=sid,
+                                page=page_num,
+                                bbox=bbox,
+                                text=t,
+                                section_label=None,
+                                font_size_max=fmax,
+                            )
+                        )
+    finally:
+        doc.close()
+    return infer_section_labels(raw)
+
+
+def choose_blocks_for_m3_groups(
+    schema_body: dict[str, Any],
+    pdf_bytes: bytes,
+    layout_blocks: list[TextBlock],
+) -> list[TextBlock]:
+    """Return span-level blocks for explicit ``table`` groups when layout-safe.
+
+    Uses ``parse_pdf_span_blocks`` only when no group uses ``list`` or ``sections`` (those need
+    merged layout lines). Implicit default ``table`` continues to use layout blocks.
+    """
+
+    if str(schema_body.get("version") or "") != "2":
+        return layout_blocks
+    groups = schema_body.get("groups") or {}
+    if not isinstance(groups, dict) or not groups:
+        return layout_blocks
+    specs = [g for g in groups.values() if isinstance(g, dict)]
+    if not specs:
+        return layout_blocks
+    if any(str(g.get("structure_hint") or "").lower() == "list" for g in specs):
+        return layout_blocks
+    if any(str(g.get("structure_hint") or "").lower() == "sections" for g in specs):
+        return layout_blocks
+    if any(str(g.get("structure_hint") or "").lower() == "table" for g in specs):
+        return parse_pdf_span_blocks(pdf_bytes)
+    return layout_blocks

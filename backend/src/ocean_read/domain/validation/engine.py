@@ -2,52 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-_NUMERIC_EPS = 0.001
-# Slacks only near boundaries so ``min``/``max`` stay inclusive without widening the band.
+from ocean_read.domain.validation.expression_evaluator import (
+    ExpressionEvaluationError,
+    evaluate_boolean_expression,
+    expression_identifiers,
+    interpolate_field_template,
+)
+from ocean_read.domain.validation.outcomes import (
+    FieldRuleOutcome,
+    FieldValidationError,
+    ValidationReport,
+)
+from ocean_read.domain.validation.repeating_groups import validate_repeating_groups
+
+if TYPE_CHECKING:
+    from ocean_read.domain.validation.pdf_blocks import TextBlock
+
 _RANGE_BOUND_SLACK = 1e-9
 
-_RULE_SORT = {"required": 0, "type_check": 1, "range_validation": 2}
-
-
-@dataclass(frozen=True)
-class FieldValidationError:
-    field: str
-    value: Any
-    expected: Any
-    rule: str
-    evidence: dict[str, Any] | None
-
-
-@dataclass(frozen=True)
-class FieldRuleOutcome:
-    """One check of a single global rule against one field (pass or fail)."""
-
-    field: str
-    rule: str
-    passed: bool
-    value: Any | None = None
-    expected: Any | None = None
-    evidence: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class ValidationReport:
-    """Result of schema validation (Stages 7–8); ``status`` is PASS or FAIL only.
-
-    ``AMBIGUOUS`` is assigned by the pipeline when inconsistency is detected **before**
-    this function runs; see :func:`validate_schema`.
-
-    ``outcomes`` lists every rule–field check executed (for audit / UI), including passes.
-    """
-
-    schema_key: str | None
-    schema_version: str | None
-    status: str  # PASS | FAIL
-    errors: tuple[FieldValidationError, ...]
-    outcomes: tuple[FieldRuleOutcome, ...]
+_RULE_SORT = {"required": 0, "type_check": 1, "range_validation": 2, "group_not_found": 5}
 
 
 def _coerce_number(v: Any) -> float | None:
@@ -58,6 +33,12 @@ def _coerce_number(v: Any) -> float | None:
     return None
 
 
+def _milestone3_active(schema_body: dict[str, Any]) -> bool:
+    """M3 rules apply only when the schema declares ``version`` ``\"2\"`` (see milestone doc)."""
+
+    return str(schema_body.get("version") or "") == "2"
+
+
 def validate_schema(
     *,
     resolved: dict[str, Any],
@@ -65,8 +46,12 @@ def validate_schema(
     schema_key: str | None = None,
     version_label: str | None = None,
     evidence_map: dict[str, dict[str, Any]] | None = None,
+    blocks: list[TextBlock] | None = None,
 ) -> ValidationReport:
     """Validate resolved values against the schema DSL (min/max, required, type_check).
+
+    Milestone 3: optional ``cross_field_rules``, ``groups``, and ``version`` — see product docs.
+    When ``blocks`` is provided, repeating ``groups`` are validated against extracted rows.
 
     Supported global ``rules`` entries in ``schema_body``:
 
@@ -238,6 +223,12 @@ def validate_schema(
                     )
                 )
 
+    if _milestone3_active(schema_body):
+        _apply_cross_field_rules(resolved, schema_body, ev, errors, outcomes)
+        ge, go = validate_repeating_groups(blocks or [], schema_body, ev)
+        errors.extend(ge)
+        outcomes.extend(go)
+
     outcomes.sort(key=lambda o: (o.field, _RULE_SORT.get(o.rule, 9)))
 
     status = "PASS" if not errors else "FAIL"
@@ -257,6 +248,7 @@ def validate_wine_style_schema(
     schema_key: str | None = None,
     version_label: str | None = None,
     evidence_map: dict[str, dict[str, Any]] | None = None,
+    blocks: list[TextBlock] | None = None,
 ) -> ValidationReport:
     """Backward-compatible alias for :func:`validate_schema`."""
 
@@ -266,4 +258,98 @@ def validate_wine_style_schema(
         schema_key=schema_key,
         version_label=version_label,
         evidence_map=evidence_map,
+        blocks=blocks,
     )
+
+
+def _apply_cross_field_rules(
+    resolved: dict[str, Any],
+    schema_body: dict[str, Any],
+    ev: dict[str, dict[str, Any]],
+    errors: list[FieldValidationError],
+    outcomes: list[FieldRuleOutcome],
+) -> None:
+    """Append cross-field rule errors/outcomes (M3). Skips a rule if any referenced value is missing."""
+
+    cfs = schema_body.get("cross_field_rules") or []
+    if not isinstance(cfs, list) or not cfs:
+        return
+    fields_spec = schema_body.get("fields") or {}
+    if not isinstance(fields_spec, dict):
+        return
+
+    for cf in cfs:
+        if not isinstance(cf, dict):
+            continue
+        rid = str(cf.get("id") or "cross_field")
+        expr = str(cf.get("expression") or "")
+        msg_t = str(cf.get("error_message") or f"Cross-field rule {rid} failed")
+        declared = [str(x) for x in (cf.get("fields") or []) if x]
+        if not expr:
+            continue
+        try:
+            idents = expression_identifiers(expr)
+        except ExpressionEvaluationError:
+            continue
+        if any(i not in resolved for i in idents):
+            continue
+        binding: dict[str, float] = {}
+        skip = False
+        for i in idents:
+            if i not in fields_spec:
+                skip = True
+                break
+            num = _coerce_number(resolved.get(i))
+            if num is None:
+                skip = True
+                break
+            binding[i] = float(num)
+        if skip:
+            continue
+        anchor = declared[0] if declared else (next(iter(idents)) if idents else "cross_field")
+        ev_cf = _merge_field_evidence(declared or list(idents), ev)
+        try:
+            ok = evaluate_boolean_expression(expr, binding)
+        except ExpressionEvaluationError:
+            ok = False
+        interp_values = {k: resolved[k] for k in idents if k in resolved}
+        interp = interpolate_field_template(msg_t, interp_values)
+        if ok:
+            outcomes.append(
+                FieldRuleOutcome(
+                    field=anchor,
+                    rule=rid,
+                    passed=True,
+                    value=binding,
+                    expected=expr,
+                    evidence=ev_cf,
+                )
+            )
+        else:
+            errors.append(
+                FieldValidationError(
+                    field=anchor,
+                    value=binding,
+                    expected=expr,
+                    rule=rid,
+                    evidence=ev_cf,
+                )
+            )
+            outcomes.append(
+                FieldRuleOutcome(
+                    field=anchor,
+                    rule=rid,
+                    passed=False,
+                    value=binding,
+                    expected=interp,
+                    evidence=ev_cf,
+                )
+            )
+
+
+def _merge_field_evidence(field_names: list[str], ev: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    by: dict[str, Any] = {}
+    for f in field_names:
+        if f in ev and ev[f]:
+            by[f] = ev[f]
+    return {"by_field": by} if by else None

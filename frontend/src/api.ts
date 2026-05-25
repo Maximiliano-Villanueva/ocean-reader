@@ -59,6 +59,13 @@ export type ValidationSchemaVersionCreateInput = {
   archive_previous_active?: boolean;
 };
 
+/** Response from POST suggest-cross-field-rule (M3 LLM assist). */
+export type SuggestCrossFieldRuleOut = {
+  id: string;
+  expression: string;
+  error_message: string;
+};
+
 export type ValidationSchemaVersionDetailOut = {
   id: string;
   schema_key: string;
@@ -74,6 +81,8 @@ export type ValidationEvidenceOut = {
   page: number;
   bbox?: number[] | null;
   section_label?: string | null;
+  /** Cross-field rules: highlight each involved field on the PDF. */
+  by_field?: Record<string, ValidationEvidenceOut> | null;
 };
 
 export type ValidationFieldErrorOut = {
@@ -120,6 +129,10 @@ export type ValidationRunSummary = {
   document_filename: string;
   outcome: string;
   created_at?: string | null;
+  /** Set when the run was archived (hidden from default history). */
+  archived_at?: string | null;
+  /** Set when the run was soft-deleted from default history. */
+  deleted_at?: string | null;
 };
 
 export type ValidationRunsPageResponse = {
@@ -138,6 +151,10 @@ export type ValidationRunDetailOut = {
   created_at: string | null;
   report: ValidateDocumentResponse;
   has_pdf: boolean;
+  /** SHA-256 fingerprint of uploaded PDF (empty on legacy rows). */
+  pdf_hash?: string;
+  archived_at?: string | null;
+  deleted_at?: string | null;
 };
 
 export type LogContainer = {
@@ -168,6 +185,15 @@ export const api = {
         `/api/projects/${encodeURIComponent(projectId)}/validation-schemas/${encodeURIComponent(schemaRowId)}`,
       ),
 
+    suggestCrossFieldRule: (
+      projectId: string,
+      body: { natural_language: string; allowed_field_names: string[] },
+    ) =>
+      jsonFetch<SuggestCrossFieldRuleOut>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-schemas/suggest-cross-field-rule`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+
     validateDocument: async (
       projectId: string,
       schemaId: string,
@@ -188,14 +214,53 @@ export const api = {
       return resp.json() as Promise<ValidateDocumentResponse>;
     },
 
-    listRuns: (projectId: string, page = 1, pageSize = 25) =>
-      jsonFetch<ValidationRunsPageResponse>(
-        `/api/projects/${encodeURIComponent(projectId)}/validation-runs?page=${page}&page_size=${pageSize}`,
-      ),
+    listRuns: (
+      projectId: string,
+      page = 1,
+      pageSize = 25,
+      filters?: {
+        schemaKey?: string;
+        versionLabel?: string;
+        documentContains?: string;
+        status?: string;
+        includeHidden?: boolean;
+      },
+    ) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        page_size: String(pageSize),
+      });
+      if (filters?.schemaKey) params.set("schema_key", filters.schemaKey);
+      if (filters?.versionLabel) params.set("version_label", filters.versionLabel);
+      if (filters?.documentContains) params.set("document_contains", filters.documentContains);
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.includeHidden) params.set("include_hidden", "true");
+      return jsonFetch<ValidationRunsPageResponse>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-runs?${params.toString()}`,
+      );
+    },
 
     getRun: (projectId: string, runId: string) =>
       jsonFetch<ValidationRunDetailOut>(
         `/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}`,
+      ),
+
+    /** Archive a run (hidden from default list; recover with restore or include_hidden list). */
+    patchRunLifecycle: (
+      projectId: string,
+      runId: string,
+      body: { archived?: boolean; restore?: boolean },
+    ) =>
+      jsonFetch<{ id: string; archived_at?: string | null; deleted_at?: string | null }>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+
+    /** Soft-delete from default history (row kept for audit; use restore to show again). */
+    softDeleteRun: (projectId: string, runId: string) =>
+      jsonFetch<{ status: string }>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}`,
+        { method: "DELETE" },
       ),
 
     deleteSchemaVersion: (projectId: string, schemaRowId: string) =>
@@ -204,13 +269,50 @@ export const api = {
         { method: "DELETE" },
       ),
 
-    /** Blob URL for iframe preview — caller must ``URL.revokeObjectURL`` when unmounting. */
+    fetchRunBlocks: (projectId: string, runId: string) =>
+      jsonFetch<
+        Array<{
+          id: string;
+          page: number;
+          bbox?: number[] | null;
+          text?: string;
+        }>
+      >(`/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}/blocks`),
+
+    fetchRunCandidates: (projectId: string, runId: string) =>
+      jsonFetch<
+        Array<{
+          field: string;
+          value?: unknown;
+          source?: string;
+          confidence?: number;
+          block_id?: string;
+          page?: number;
+          bbox?: number[] | null;
+        }>
+      >(`/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}/candidates`),
+
+    /** Blob URL for PDF preview — caller must ``URL.revokeObjectURL`` when unmounting. */
     fetchRunPdfObjectUrl: async (projectId: string, runId: string): Promise<string | null> => {
       const url = `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}/document`;
       const resp = await fetch(url, { headers: withEdgeHeaders() });
       if (!resp.ok) return null;
       const blob = await resp.blob();
       return URL.createObjectURL(blob);
+    },
+
+    /** Stored PDF as ``File`` for re-validation (new run). */
+    fetchRunPdfAsFile: async (
+      projectId: string,
+      runId: string,
+      filename: string,
+    ): Promise<File | null> => {
+      const url = `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}/document`;
+      const resp = await fetch(url, { headers: withEdgeHeaders() });
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      const name = filename.trim() || "document.pdf";
+      return new File([blob], name, { type: blob.type || "application/pdf" });
     },
   },
 

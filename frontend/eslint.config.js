@@ -18,5 +18,10 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Standard fetch-on-mount (async in useEffect) is intentional; this rule flags many
+      // legitimate patterns (e.g. clearing error then awaiting API).
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

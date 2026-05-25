@@ -9,6 +9,8 @@ lerna-debug.log*
 
 node_modules
 dist
+# Copied from pdfjs-dist at prebuild/predev (see scripts/copy-pdf-worker.mjs)
+public/pdf.worker.min.mjs
 dist-ssr
 *.local
 

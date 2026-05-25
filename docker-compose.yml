@@ -121,12 +121,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://ocean:ocean@db:5432/ocean_read}
+      # Always use the Compose `db` hostname here. Do not pass host-only URLs from `.env`
+      # (e.g. 127.0.0.1:15432) or Alembic/uvicorn inside the container cannot reach Postgres.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ocean}:${POSTGRES_PASSWORD:-ocean}@db:5432/${POSTGRES_DB:-ocean_read}
       UPLOAD_ROOT: /data/uploads
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LLM_MODEL: ${LLM_MODEL:-gemma4:e4b}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
       VALIDATION_LLM_FALLBACK_ENABLED: ${VALIDATION_LLM_FALLBACK_ENABLED:-false}
+      VALIDATION_SCHEMA_LLM_ASSIST_ENABLED: ${VALIDATION_SCHEMA_LLM_ASSIST_ENABLED:-false}
       LOG_VIEWER_ENABLED: ${LOG_VIEWER_ENABLED:-true}
       LOG_VIEWER_TOKEN: ${LOG_VIEWER_TOKEN:-}
       COMPOSE_PROJECT_NAME: ocean-read

@@ -86,6 +86,10 @@ class ValidationRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     document_filename: Mapped[str] = mapped_column(String(1024), nullable=False)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     report: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    pdf_hash: Mapped[str] = mapped_column(String(71), nullable=False)
+    snapshots: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     pdf_relative_path: Mapped[Optional[str]] = mapped_column(String(4096), nullable=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="validation_runs")

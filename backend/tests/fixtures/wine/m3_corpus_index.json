@@ -1,0 +1,30 @@
+{
+  "schema": "schema_m3_wine_cross_field.json",
+  "rows": [
+    {
+      "id": "syn_m3_cf_pass",
+      "csv_row_index": -1,
+      "clean_pdf": "m3_cross_field/syn_m3_cf_pass.pdf",
+      "clean_truth": "m3_cross_field/syn_m3_cf_pass.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "syn_m3_cf_fail_high_alcohol",
+      "csv_row_index": -1,
+      "clean_pdf": "m3_cross_field/syn_m3_cf_fail_high_alcohol.pdf",
+      "clean_truth": "m3_cross_field/syn_m3_cf_fail_high_alcohol.json",
+      "noisy_pdf": null,
+      "noisy_truth": null,
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "alcohol",
+          "rule": "high_alcohol_quality"
+        }
+      ]
+    }
+  ]
+}

@@ -6,6 +6,7 @@ Requires PostgreSQL with migrations applied (``DATABASE_URL`` / default Compose 
 from __future__ import annotations
 
 import io
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -52,6 +53,13 @@ async def test_validate_document_pass(validation_api_seed: dict) -> None:
     assert body["schema_id"] == "wine_schema"
     assert body["schema_version"] == "1.0"
     assert body["results"] == []
+    outcomes = body.get("field_rule_outcomes") or []
+    with_bbox = [
+        o
+        for o in outcomes
+        if o.get("evidence") and isinstance(o["evidence"].get("bbox"), list) and len(o["evidence"]["bbox"]) >= 4
+    ]
+    assert with_bbox, "PASS runs should include bbox on field evidence for PDF highlighting"
 
 
 @pytest.mark.asyncio
@@ -200,6 +208,79 @@ async def test_post_validation_schema_version_and_duplicate_409(validation_api_s
             json={"schema_key": "extra_wine", "version_label": "0.1"},
         )
         assert r2.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_post_validation_schema_rejects_invalid_m3_cross_field(validation_api_seed: dict) -> None:
+    """M3: invalid ``cross_field_rules`` expression returns 400 before DB insert."""
+
+    pid = validation_api_seed["project_id"]
+    bad_body = {
+        "version": "2",
+        "fields": {"a": {"type": "number"}},
+        "rules": [],
+        "cross_field_rules": [{"id": "x", "expression": "(", "error_message": "m", "fields": ["a"]}],
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/api/projects/{pid}/validation-schemas",
+            json={"schema_key": "m3_bad", "version_label": "0.1", "body": bad_body},
+        )
+    assert r.status_code == 400
+    detail = r.json().get("detail")
+    assert isinstance(detail, dict)
+    assert "schema_dsl_errors" in detail
+
+
+@pytest.mark.asyncio
+async def test_suggest_cross_field_rule_forbidden_when_disabled(
+    validation_api_seed: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VALIDATION_SCHEMA_LLM_ASSIST_ENABLED", raising=False)
+    from ocean_read.config import get_settings
+
+    get_settings.cache_clear()
+    pid = validation_api_seed["project_id"]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/api/projects/{pid}/validation-schemas/suggest-cross-field-rule",
+            json={"natural_language": "test", "allowed_field_names": ["a"]},
+        )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_suggest_cross_field_rule_ok_when_enabled(
+    validation_api_seed: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VALIDATION_SCHEMA_LLM_ASSIST_ENABLED", "true")
+    from ocean_read.config import get_settings
+
+    get_settings.cache_clear()
+    pid = validation_api_seed["project_id"]
+    with patch(
+        "ocean_read.api.routers.validation.suggest_cross_field_rule_from_nl",
+        new_callable=AsyncMock,
+    ) as m:
+        m.return_value = {
+            "id": "high_alcohol_quality",
+            "expression": "quality >= 5 OR alcohol < 12",
+            "error_message": "Quality must track alcohol",
+        }
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.post(
+                f"/api/projects/{pid}/validation-schemas/suggest-cross-field-rule",
+                json={
+                    "natural_language": "If alcohol is at least 12, quality must be at least 5",
+                    "allowed_field_names": ["alcohol", "quality"],
+                },
+            )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["expression"] == "quality >= 5 OR alcohol < 12"
+    assert data["id"] == "high_alcohol_quality"
 
 
 @pytest.mark.asyncio

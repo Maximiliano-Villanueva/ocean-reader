@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Validation pipeline: optional LLM fallback after regex/layout (temperature 0; internal only).
     validation_llm_fallback_enabled: bool = Field(default=False, alias="VALIDATION_LLM_FALLBACK_ENABLED")
 
+    # Schema editor: optional Ollama assist to draft ``cross_field_rules`` from natural language (M3).
+    validation_schema_llm_assist_enabled: bool = Field(default=False, alias="VALIDATION_SCHEMA_LLM_ASSIST_ENABLED")
+
 
 @lru_cache
 def get_settings() -> Settings:

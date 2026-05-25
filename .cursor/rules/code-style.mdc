@@ -1,0 +1,21 @@
+---
+alwaysApply: true
+---
+# Coding style
+You must always use TDD, write the test BEFORE writting the code in order to ensure correctness.
+
+The code must be easily human readeable and well documented this includes comments in the lines when needed and ALL functions/classes must have a docstring, ideally each python file has it's own docstring at the start of the file explaining what this contains.
+
+Use modules and packages whenever something can be coded to reuse in other projects.
+
+Use SOLID principles.
+
+
+You need to check the skills at skills/caveman
+You need to check the skills at skills/debug
+You need to check the skills at skills/improve-code-base
+You need to check the skills at skills/tdd
+You need to check the skills at skills/zoom-out
+
+It is critical that we follow the sotware principles and that we document EVERYTHING, someone who has no knowledge about the project should always be able to understand everything by reading the docs, this is also to be consumed by AI to make improvements and drive the code so its criticall that we document architecture, structure comment every important part of the code and everything that needs to be understood to make modifications.
+

@@ -48,6 +48,13 @@ class ValidationEvidenceOut(BaseModel):
     page: int = 1
     bbox: list[float] | None = None
     section_label: str | None = None
+    by_field: dict[str, "ValidationEvidenceOut"] | None = Field(
+        default=None,
+        description="Cross-field rules: per-field evidence refs (each may include bbox).",
+    )
+
+
+ValidationEvidenceOut.model_rebuild()
 
 
 class ValidationFieldErrorOut(BaseModel):
@@ -108,6 +115,8 @@ class ValidationRunSummary(BaseModel):
     document_filename: str
     outcome: str
     created_at: str | None = None
+    archived_at: str | None = None
+    deleted_at: str | None = None
 
 
 class ValidationRunsPage(BaseModel):
@@ -130,6 +139,27 @@ class ValidationRunDetailOut(BaseModel):
     created_at: str | None = None
     report: ValidateDocumentResponse
     has_pdf: bool
+    pdf_hash: str = Field(default="", description="SHA-256 fingerprint of uploaded PDF bytes.")
+    archived_at: str | None = None
+    deleted_at: str | None = None
+
+
+class ValidationRunLifecyclePatch(BaseModel):
+    """Update run visibility in history. ``restore`` clears both archive and soft-delete."""
+
+    archived: bool | None = Field(
+        default=None,
+        description="True archives the run (hidden from default list); False clears archive only.",
+    )
+    restore: bool = Field(default=False, description="When true, clears archived_at and deleted_at.")
+
+
+class ValidationRunLifecycleStateOut(BaseModel):
+    """Lifecycle timestamps after PATCH (audit recovery)."""
+
+    id: str
+    archived_at: str | None = None
+    deleted_at: str | None = None
 
 
 class ValidationSchemaVersionSummary(BaseModel):
@@ -167,3 +197,22 @@ class ValidationSchemaVersionCreate(BaseModel):
     version_label: str | None = Field(default=None, max_length=64)
     body: dict[str, Any] | None = None
     archive_previous_active: bool = True
+
+
+class SuggestCrossFieldRuleIn(BaseModel):
+    """Request body for M3 LLM-assisted cross-field rule drafting."""
+
+    natural_language: str = Field(..., min_length=1, max_length=8000)
+    allowed_field_names: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Top-level schema field names the expression may reference.",
+    )
+
+
+class SuggestCrossFieldRuleOut(BaseModel):
+    """Validated suggestion ready to merge into ``cross_field_rules``."""
+
+    id: str
+    expression: str
+    error_message: str

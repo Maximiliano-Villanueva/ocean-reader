@@ -1,0 +1,43 @@
+{
+  "version": "2",
+  "fields": {
+    "ph": {
+      "type": "number",
+      "required": true,
+      "min": 2.5,
+      "max": 4.5,
+      "aliases": ["pH", "Measured pH"]
+    },
+    "alcohol": {
+      "type": "number",
+      "required": true,
+      "min": 8.0,
+      "max": 15.0,
+      "aliases": ["Alcohol", "Alcohol %"]
+    },
+    "quality": {
+      "type": "number",
+      "required": true,
+      "min": 0,
+      "max": 10,
+      "aliases": ["Quality", "Quality score"]
+    },
+    "total_sulfur_dioxide": { "type": "number", "required": false },
+    "free_sulfur_dioxide": { "type": "number", "required": false }
+  },
+  "rules": ["required", "range_validation", "type_check"],
+  "cross_field_rules": [
+    {
+      "id": "high_alcohol_quality",
+      "expression": "quality >= 5 OR alcohol < 12",
+      "error_message": "Wine with alcohol ≥ 12% must have quality ≥ 5 (alcohol {alcohol}, quality {quality})",
+      "fields": ["alcohol", "quality"]
+    },
+    {
+      "id": "sulfur_dioxide_order",
+      "expression": "total_sulfur_dioxide >= free_sulfur_dioxide",
+      "error_message": "Total SO2 ({total_sulfur_dioxide}) must be ≥ free ({free_sulfur_dioxide})",
+      "fields": ["free_sulfur_dioxide", "total_sulfur_dioxide"]
+    }
+  ]
+}

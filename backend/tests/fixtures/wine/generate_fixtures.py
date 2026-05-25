@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build M1 wine validation corpus: ``clean/``, ``noisy/``, ``corpus_index.json``, per-row JSON.
+"""Build wine validation corpus: ``clean/``, ``noisy/``, ``fail_schema/``, ``fail_missing/``,
+``ambiguous/``, ``corpus_index.json``, and per-row JSON truth files.
 
 Run manually after changing cases or schema::
 
@@ -70,10 +71,227 @@ def _build_pdf(text: str) -> bytes:
     return out
 
 
+def _append_synthetic_corpus(base: Path, specs: list[dict[str, object]]) -> None:
+    """Add hand-crafted PDFs not tied to CSV rows: schema violations, missing fields, ambiguity.
+
+    Layout under ``fixtures/wine/``:
+
+    - ``fail_schema/`` — all three fields present in text but at least one violates range.
+    - ``fail_missing/`` — document omits one or more required labels so validation fails ``required``.
+    - ``ambiguous/`` — conflicting duplicate readings for the same logical field → ``AMBIGUOUS``.
+    """
+
+    fail_schema = base / "fail_schema"
+    fail_missing = base / "fail_missing"
+    ambiguous_dir = base / "ambiguous"
+    for d in (fail_schema, fail_missing, ambiguous_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    def write_case(
+        rel_pdf: str,
+        lines: list[str],
+        *,
+        truth: dict[str, float | int],
+        row: dict[str, object],
+    ) -> None:
+        pdf_path = base / rel_pdf
+        pdf_path.write_bytes(_build_pdf("\n".join(lines)))
+        truth_path = base / str(row["clean_truth"])
+        truth_path.write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
+        specs.append(row)
+
+    header = "Wine QA Report (synthetic)"
+
+    # --- 5× FAIL by schema (values extracted, violate range) ---
+    fs: list[tuple[str, list[str], dict[str, float | int], str, list[dict[str, str]]]] = [
+        (
+            "syn_fs_alcohol_high.pdf",
+            [header, "pH: 3.5", "Alcohol: 18%", "Quality: 7"],
+            {"ph": 3.5, "alcohol": 18.0, "quality": 7},
+            "FAIL",
+            [{"field": "alcohol", "rule": "range_validation"}],
+        ),
+        (
+            "syn_fs_ph_high.pdf",
+            [header, "pH: 5.0", "Alcohol: 12%", "Quality: 7"],
+            {"ph": 5.0, "alcohol": 12.0, "quality": 7},
+            "FAIL",
+            [{"field": "ph", "rule": "range_validation"}],
+        ),
+        (
+            "syn_fs_quality_high.pdf",
+            [header, "pH: 3.4", "Alcohol: 12%", "Quality: 11"],
+            {"ph": 3.4, "alcohol": 12.0, "quality": 11},
+            "FAIL",
+            [{"field": "quality", "rule": "range_validation"}],
+        ),
+        (
+            "syn_fs_alcohol_low.pdf",
+            [header, "pH: 3.4", "Alcohol: 7.0%", "Quality: 7"],
+            {"ph": 3.4, "alcohol": 7.0, "quality": 7},
+            "FAIL",
+            [{"field": "alcohol", "rule": "range_validation"}],
+        ),
+        (
+            "syn_fs_ph_low.pdf",
+            [header, "pH: 2.4", "Alcohol: 12%", "Quality: 7"],
+            {"ph": 2.4, "alcohol": 12.0, "quality": 7},
+            "FAIL",
+            [{"field": "ph", "rule": "range_validation"}],
+        ),
+    ]
+    for fname, lines, truth, st, errs in fs:
+        rid = fname.replace(".pdf", "")
+        rel = f"fail_schema/{fname}"
+        write_case(
+            rel,
+            lines,
+            truth=truth,
+            row={
+                "id": rid,
+                "csv_row_index": -1,
+                "clean_pdf": rel,
+                "clean_truth": rel.replace(".pdf", ".json"),
+                "noisy_pdf": None,
+                "noisy_truth": None,
+                "expected_status": st,
+                "expected_errors": errs,
+            },
+        )
+
+    # --- 5× FAIL by missing data in PDF (required fields) ---
+    fm: list[tuple[str, list[str], dict[str, float | int], list[dict[str, str]]]] = [
+        (
+            "syn_fm_no_quality.pdf",
+            [header, "pH: 3.5", "Alcohol: 12%"],
+            {"ph": 3.5, "alcohol": 12.0},
+            [{"field": "quality", "rule": "required"}],
+        ),
+        (
+            "syn_fm_no_ph.pdf",
+            [header, "Alcohol: 12%", "Quality: 7"],
+            {"alcohol": 12.0, "quality": 7},
+            [{"field": "ph", "rule": "required"}],
+        ),
+        (
+            "syn_fm_no_alcohol.pdf",
+            [header, "pH: 3.5", "Quality: 7"],
+            {"ph": 3.5, "quality": 7},
+            [{"field": "alcohol", "rule": "required"}],
+        ),
+        (
+            "syn_fm_only_quality.pdf",
+            [header, "Quality: 7"],
+            {"quality": 7},
+            [
+                {"field": "ph", "rule": "required"},
+                {"field": "alcohol", "rule": "required"},
+            ],
+        ),
+        (
+            "syn_fm_header_only.pdf",
+            [header],
+            {},
+            [
+                {"field": "ph", "rule": "required"},
+                {"field": "alcohol", "rule": "required"},
+                {"field": "quality", "rule": "required"},
+            ],
+        ),
+    ]
+    for fname, lines, truth, errs in fm:
+        rid = fname.replace(".pdf", "")
+        rel = f"fail_missing/{fname}"
+        write_case(
+            rel,
+            lines,
+            truth=truth,
+            row={
+                "id": rid,
+                "csv_row_index": -1,
+                "clean_pdf": rel,
+                "clean_truth": rel.replace(".pdf", ".json"),
+                "noisy_pdf": None,
+                "noisy_truth": None,
+                "expected_status": "FAIL",
+                "expected_errors": errs,
+            },
+        )
+
+    # --- 5× AMBIGUOUS (conflicting extractions for same field) ---
+    amb: list[tuple[str, list[str], dict[str, float | int], list[str]]] = [
+        (
+            "syn_amb_ph_dup.pdf",
+            [header, "pH: 3.1", "pH: 4.2", "Alcohol: 12%", "Quality: 7"],
+            {"ph": 3.1, "alcohol": 12.0, "quality": 7},
+            ["ph"],
+        ),
+        (
+            "syn_amb_alcohol_dup.pdf",
+            [header, "pH: 3.5", "Alcohol: 11%", "Alcohol: 13%", "Quality: 7"],
+            {"ph": 3.5, "alcohol": 11.0, "quality": 7},
+            ["alcohol"],
+        ),
+        (
+            "syn_amb_quality_dup.pdf",
+            [header, "pH: 3.5", "Alcohol: 12%", "Quality: 6", "Quality: 8"],
+            {"ph": 3.5, "alcohol": 12.0, "quality": 6},
+            ["quality"],
+        ),
+        (
+            "syn_amb_ph_triple.pdf",
+            [header, "Measured pH: 3.0", "pH level: 3.9", "ph value: 4.1", "Alcohol: 12%", "Quality: 7"],
+            {"ph": 3.0, "alcohol": 12.0, "quality": 7},
+            ["ph"],
+        ),
+        (
+            "syn_amb_alcohol_regex_vs_layout.pdf",
+            [
+                header,
+                "pH: 3.5",
+                "Alcohol: 10%",
+                "Also note alcohol measured at 14 on duplicate tank sample",
+                "Quality: 7",
+            ],
+            {"ph": 3.5, "alcohol": 10.0, "quality": 7},
+            ["alcohol"],
+        ),
+    ]
+    for fname, lines, truth, amb_fields in amb:
+        rid = fname.replace(".pdf", "")
+        rel = f"ambiguous/{fname}"
+        write_case(
+            rel,
+            lines,
+            truth=truth,
+            row={
+                "id": rid,
+                "csv_row_index": -1,
+                "clean_pdf": rel,
+                "clean_truth": rel.replace(".pdf", ".json"),
+                "noisy_pdf": None,
+                "noisy_truth": None,
+                "expected_status": "AMBIGUOUS",
+                "expected_errors": [],
+                "expected_ambiguous_fields": amb_fields,
+            },
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, default=None, help="Override winequality-red.csv path")
+    parser.add_argument(
+        "--m3-only",
+        action="store_true",
+        help="Only write M3 cross-field corpus (no CSV / M1 corpus_index refresh)",
+    )
     args = parser.parse_args()
+
+    base = _here()
+    if args.m3_only:
+        write_m3_cross_field_corpus(base)
+        return
 
     root = _repo_root()
     csv_path = args.csv or (root / "data" / "winequality-red.csv")
@@ -188,11 +406,70 @@ def main() -> None:
         omit_quality=False,
     )
 
+    _append_synthetic_corpus(base, specs)
+
     manifest = {"schema": "schema.json", "rows": specs}
     (base / "corpus_index.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
+    write_m3_cross_field_corpus(base)
+
     print(f"Wrote corpus under {base}")
     print(f"Rows: {len(specs)}")
+
+
+def write_m3_cross_field_corpus(base: Path) -> None:
+    """Hand-crafted PDFs for ``schema_m3_wine_cross_field.json`` (no CSV required).
+
+    Writes ``m3_cross_field/*.pdf`` + ``m3_corpus_index.json`` for :mod:`test_pipeline_m3_corpus`.
+    """
+
+    m3_dir = base / "m3_cross_field"
+    m3_dir.mkdir(parents=True, exist_ok=True)
+    header = "Wine QA Report (synthetic)"
+    rows: list[dict[str, object]] = []
+
+    def add(
+        stem: str,
+        lines: list[str],
+        truth: dict[str, float | int],
+        *,
+        status: str,
+        errors: list[dict[str, str]],
+    ) -> None:
+        rel = f"m3_cross_field/{stem}.pdf"
+        (base / rel).write_bytes(_build_pdf("\n".join(lines)))
+        (base / f"m3_cross_field/{stem}.json").write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
+        rows.append(
+            {
+                "id": stem,
+                "csv_row_index": -1,
+                "clean_pdf": rel,
+                "clean_truth": f"m3_cross_field/{stem}.json",
+                "noisy_pdf": None,
+                "noisy_truth": None,
+                "expected_status": status,
+                "expected_errors": errors,
+            }
+        )
+
+    add(
+        "syn_m3_cf_pass",
+        [header, "pH: 3.5", "Alcohol: 11%", "Quality: 6"],
+        {"ph": 3.5, "alcohol": 11.0, "quality": 6},
+        status="PASS",
+        errors=[],
+    )
+    add(
+        "syn_m3_cf_fail_high_alcohol",
+        [header, "pH: 3.5", "Alcohol: 13%", "Quality: 4"],
+        {"ph": 3.5, "alcohol": 13.0, "quality": 4},
+        status="FAIL",
+        errors=[{"field": "alcohol", "rule": "high_alcohol_quality"}],
+    )
+
+    manifest = {"schema": "schema_m3_wine_cross_field.json", "rows": rows}
+    (base / "m3_corpus_index.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(f"M3 cross-field corpus: {len(rows)} rows under {m3_dir}")
 
 
 if __name__ == "__main__":

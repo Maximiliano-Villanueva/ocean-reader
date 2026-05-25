@@ -336,11 +336,29 @@ A "Groups" section in the schema editor allows declaring table/list validation:
 Milestone 3 is complete when:
 
 - Cross-field rules evaluate correctly for all test cases.
-- Repeating group extraction and validation work for table structure.
-- Schema editor supports authoring both rule types (form + LLM assist).
+- Repeating group extraction and validation work for **table**, **list**, and **sections** structures.
+- Schema editor supports authoring both rule types (**forms** + optional **LLM assist** for cross-field expressions when enabled).
 - All new rule types have unit tests.
-- Wine dataset is expanded with cross-field test cases.
+- Wine dataset includes a bundled M3 schema fixture exercised by the validation pipeline tests.
 - Expression evaluator has no `eval` — fully sandboxed.
+
+---
+
+## Implementation status (engineering)
+
+| Area | Status | Notes |
+|------|--------|--------|
+| Cross-field expressions | **Done** | `expression_evaluator.py` — recursive-descent AST, no `eval` / `exec`. |
+| Cross-field in rule engine | **Done** | `engine.validate_schema` when `"version": "2"`. |
+| Repeating groups | **Done** | `repeating_groups.py`: **table**, **list**, **sections**; section body after header line for layout PDFs. |
+| Schema DSL validation | **Done** | `schema_dsl.collect_schema_dsl_errors`; API **400** on publish if errors. |
+| Schema editor UI | **Partial** | `ProjectSchemasPage`: JSON + append forms + LLM suggest — not full Part 4 card wireframe. |
+| Wine + cross-field fixtures | **Done** | `schema_m3_wine_cross_field.json`, `m3_corpus_index.json`, `m3_cross_field/*.pdf`; `generate_fixtures.py --m3-only`. |
+| Pipeline E2E | **Done** | `test_validation_pipeline_m3.py` (cross-field + list group on PDF); `test_pipeline_m3_corpus.py`. |
+| LLM expression assist | **Done** (opt-in) | `VALIDATION_SCHEMA_LLM_ASSIST_ENABLED` + Ollama. |
+| Tests | **Done** | See [`M3_CHECKLIST.md`](../../project_management/M3_CHECKLIST.md). |
+
+**Tracker:** [`docs/project_management/M3_CHECKLIST.md`](../../project_management/M3_CHECKLIST.md).
 
 ---
 

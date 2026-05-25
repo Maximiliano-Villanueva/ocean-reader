@@ -1,6 +1,13 @@
+/**
+ * Schema keys and immutable revisions — browse, view rules, fork new revisions.
+ */
+
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import SchemaNewKeyPanel from "../components/schemas/SchemaNewKeyPanel";
+import SchemaRevisionEditor from "../components/schemas/SchemaRevisionEditor";
+import SchemaVersionTable from "../components/schemas/SchemaVersionTable";
 import {
   api,
   type ValidationSchemaGroupOut,
@@ -10,7 +17,6 @@ import {
 
 const DEFAULT_WINE_SCHEMA_KEY = "wine_quality";
 
-/** Mirrors server default — lets users start a brand-new key without guessing shape. */
 const WINE_QUALITY_TEMPLATE = `{
   "fields": {
     "ph": {
@@ -38,18 +44,18 @@ const WINE_QUALITY_TEMPLATE = `{
   "rules": ["required", "range_validation", "type_check"]
 }`;
 
+type EditorMode = "none" | "revision" | "new-key";
+
 export default function ProjectSchemasPage() {
   const { projectId = "" } = useParams();
   const [groups, setGroups] = useState<ValidationSchemaGroupOut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** Row id → loaded definition */
   const [detailById, setDetailById] = useState<Record<string, ValidationSchemaVersionDetailOut>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
-  /** Fork-edit: publish as next server-assigned revision */
   const [revisionDraft, setRevisionDraft] = useState<{ schema_key: string; jsonText: string } | null>(null);
-  /** Optional new schema key + body for first revision */
+  const [editorMode, setEditorMode] = useState<EditorMode>("none");
   const [newKey, setNewKey] = useState("");
   const [newKeyBody, setNewKeyBody] = useState(WINE_QUALITY_TEMPLATE);
 
@@ -72,6 +78,7 @@ export default function ProjectSchemasPage() {
     try {
       await api.validation.createSchemaVersion(projectId, { schema_key: DEFAULT_WINE_SCHEMA_KEY });
       setRevisionDraft(null);
+      setEditorMode("none");
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -101,27 +108,33 @@ export default function ProjectSchemasPage() {
     }
   }
 
-  function useAsRevisionBase(v: ValidationSchemaVersionSummary, schemaKey: string) {
-    const cached = detailById[v.id];
-    const jsonText = cached
-      ? JSON.stringify(cached.body, null, 2)
-      : "// Click ‘Show definition’ first to load JSON, or paste below.";
-    setRevisionDraft({ schema_key: schemaKey, jsonText });
+  function startRevisionFromVersion(v: ValidationSchemaVersionSummary, schemaKey: string) {
+    setEditorMode("revision");
     setExpandedId(v.id);
-    if (!cached && projectId) {
-      void (async () => {
-        setDetailLoading(v.id);
-        try {
-          const d = await api.validation.getSchemaVersion(projectId, v.id);
-          setDetailById((prev) => ({ ...prev, [v.id]: d }));
-          setRevisionDraft({ schema_key: schemaKey, jsonText: JSON.stringify(d.body, null, 2) });
-        } catch (err: unknown) {
-          setError(err instanceof Error ? err.message : String(err));
-        } finally {
-          setDetailLoading(null);
-        }
-      })();
+    const cached = detailById[v.id];
+    if (cached) {
+      setRevisionDraft({ schema_key: schemaKey, jsonText: JSON.stringify(cached.body, null, 2) });
+      return;
     }
+    setRevisionDraft({
+      schema_key: schemaKey,
+      jsonText: "// Loading definition…",
+    });
+    if (!projectId) return;
+    void (async () => {
+      setDetailLoading(v.id);
+      try {
+        const d = await api.validation.getSchemaVersion(projectId, v.id);
+        setDetailById((prev) => ({ ...prev, [v.id]: d }));
+        setRevisionDraft({ schema_key: schemaKey, jsonText: JSON.stringify(d.body, null, 2) });
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
+        setRevisionDraft(null);
+        setEditorMode("none");
+      } finally {
+        setDetailLoading(null);
+      }
+    })();
   }
 
   async function publishRevision(e: FormEvent) {
@@ -142,6 +155,7 @@ export default function ProjectSchemasPage() {
         body,
       });
       setRevisionDraft(null);
+      setEditorMode("none");
       setDetailById({});
       setExpandedId(null);
       await load();
@@ -173,6 +187,7 @@ export default function ProjectSchemasPage() {
       await api.validation.createSchemaVersion(projectId, { schema_key: sk, body });
       setNewKey("");
       setNewKeyBody(WINE_QUALITY_TEMPLATE);
+      setEditorMode("none");
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -201,31 +216,24 @@ export default function ProjectSchemasPage() {
     }
   }
 
-  return (
-    <div className="page project-route-page schemas-page">
-      <header className="hero-block">
-        <h1 className="hero-title">Schemas &amp; revisions</h1>
-        <p className="hero-sub muted">
-          A <strong>schema key</strong> (e.g. <code>wine_quality</code>) names one rule bundle. Each save creates an
-          immutable <strong>revision</strong>; the server assigns the next label (<code>1.0</code> → <code>1.1</code>
-          …). You do not invent version strings unless you use Advanced mode.
-        </p>
-        <p className="muted small">
-          <Link to={`/projects/${projectId}/validation`}>Validation history</Link>
-          {" · "}
-          <Link to={`/projects/${projectId}/validation/run`}>Run validation</Link>
-        </p>
-      </header>
+  const asideOpen = editorMode !== "none";
 
-      <section className="panel-block schema-explainer">
-        <h2 className="section-heading">Does the default include rules?</h2>
-        <p className="muted">
-          Yes. The built-in wine-quality definition includes three numeric fields (<code>ph</code>, <code>alcohol</code>,{" "}
-          <code>quality</code>) with min/max and aliases, plus <code>rules</code>:{" "}
-          <code>required</code>, <code>range_validation</code>, <code>type_check</code>. Use <strong>Show definition</strong>{" "}
-          on any row to see the stored JSON.
-        </p>
-      </section>
+  return (
+    <div className={`page project-route-page schemas-page ${asideOpen ? "schemas-page--editing" : ""}`.trim()}>
+      <header className="schemas-hero hero-block">
+        <div className="schemas-hero-text">
+          <h1 className="hero-title">Schemas &amp; revisions</h1>
+          <p className="hero-sub muted">
+            Each <strong>schema key</strong> is one rule bundle. Saving always creates a new{" "}
+            <strong>revision</strong> (1.0, 1.1, …). Previous revisions stay in history.
+          </p>
+        </div>
+        <nav className="schemas-hero-links muted small">
+          <Link to={`/projects/${projectId}/validation/run`}>Run validation</Link>
+          <span aria-hidden="true"> · </span>
+          <Link to={`/projects/${projectId}/validation`}>History</Link>
+        </nav>
+      </header>
 
       {error ? (
         <p className="alert-error" role="alert">
@@ -233,139 +241,107 @@ export default function ProjectSchemasPage() {
         </p>
       ) : null}
 
-      <section className="panel-block">
-        <h2 className="section-heading">Install default bundle</h2>
-        <p className="muted small">
-          Creates (or adds the next revision of) <code>{DEFAULT_WINE_SCHEMA_KEY}</code> using the server&apos;s
-          wine-quality JSON. Safe to click multiple times — each click adds revision <code>1.1</code>,{" "}
-          <code>1.2</code>, …
+      <div className="schemas-toolbar panel-block">
+        <div className="schemas-toolbar-actions row">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={busy || !projectId}
+            onClick={() => void installDefault()}
+          >
+            {busy ? "Working…" : `Install wine template (${DEFAULT_WINE_SCHEMA_KEY})`}
+          </button>
+          <button
+            type="button"
+            className="btn-primary-lg"
+            disabled={busy}
+            onClick={() => {
+              setRevisionDraft(null);
+              setEditorMode("new-key");
+              setError(null);
+            }}
+          >
+            + New schema key
+          </button>
+        </div>
+        <p className="schemas-toolbar-hint muted small">
+          To change rules: open a version → <strong>New revision from this</strong>, edit, then publish. The active
+          revision is what validation uses by default.
         </p>
-        <button type="button" className="btn-secondary" disabled={busy || !projectId} onClick={() => void installDefault()}>
-          {busy ? "Working…" : `Install / bump ${DEFAULT_WINE_SCHEMA_KEY}`}
-        </button>
-      </section>
+      </div>
 
-      <section className="panel-block">
-        <h2 className="section-heading">Edit → new revision</h2>
-        <p className="muted small">
-          Schemas are immutable: &quot;editing&quot; means editing JSON here and publishing — the previous revision stays
-          in history (archived when a new one becomes active).
-        </p>
-        {revisionDraft ? (
-          <form className="schema-revision-form" onSubmit={publishRevision}>
-            <label className="field-label">
-              <span>Schema key (unchanged for same bundle)</span>
-              <input
-                value={revisionDraft.schema_key}
-                onChange={(e) => setRevisionDraft((d) => (d ? { ...d, schema_key: e.target.value } : null))}
-                spellCheck={false}
-              />
-            </label>
-            <label className="field-label">
-              <span>Definition JSON</span>
-              <textarea
-                className="schema-json-editor"
-                rows={18}
-                value={revisionDraft.jsonText}
-                onChange={(e) => setRevisionDraft((d) => (d ? { ...d, jsonText: e.target.value } : null))}
-                spellCheck={false}
-              />
-            </label>
-            <div className="row">
-              <button type="submit" className="btn-primary-lg" disabled={busy}>
-                Publish new revision (auto label)
-              </button>
-              <button type="button" className="btn-secondary" onClick={() => setRevisionDraft(null)}>
-                Cancel
-              </button>
+      <div className="schemas-layout">
+        <section className="schemas-main" aria-label="Schema keys">
+          {groups.length === 0 ? (
+            <div className="schemas-empty panel-block">
+              <p className="muted">No schemas yet.</p>
+              <p className="muted small">
+                Install the wine template or create a new schema key to get started.
+              </p>
             </div>
-          </form>
-        ) : (
-          <p className="muted small">Choose <strong>Use as base for new revision</strong> on a version below.</p>
-        )}
-      </section>
+          ) : (
+            <ul className="list schemas-key-list">
+              {groups.map((g) => (
+                <li key={g.schema_key} className="schema-key-card panel-block">
+                  <div className="schema-key-card-header">
+                    <h2 className="schema-key-card-title">
+                      <code>{g.schema_key}</code>
+                    </h2>
+                    <span className="muted small">
+                      {g.versions.length} revision{g.versions.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <SchemaVersionTable
+                    schemaKey={g.schema_key}
+                    versions={g.versions}
+                    expandedId={expandedId}
+                    detailById={detailById}
+                    detailLoading={detailLoading}
+                    busy={busy}
+                    onToggleDefinition={toggleDefinition}
+                    onForkRevision={(v) => startRevisionFromVersion(v, g.schema_key)}
+                    onDelete={removeVersion}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-      <section className="panel-block">
-        <h2 className="section-heading">New schema key (first revision)</h2>
-        <p className="muted small">
-          Use a new <code>schema_key</code> when the document type is not wine. Paste a full JSON body; template inserts
-          the wine shape as a starting point.
-        </p>
-        <form className="schema-new-form" onSubmit={publishNewSchemaFirstRevision}>
-          <label className="field-label">
-            <span>Schema key</span>
-            <input value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="my_customer_form" spellCheck={false} />
-          </label>
-          <label className="field-label">
-            <span>Definition JSON</span>
-            <textarea className="schema-json-editor" rows={14} value={newKeyBody} onChange={(e) => setNewKeyBody(e.target.value)} spellCheck={false} />
-          </label>
-          <div className="row">
-            <button type="button" className="btn-secondary" onClick={() => setNewKeyBody(WINE_QUALITY_TEMPLATE)}>
-              Insert wine template
-            </button>
-            <button type="submit" className="btn-primary-lg" disabled={busy}>
-              Publish first revision (auto label)
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="panel-block">
-        <h2 className="section-heading">All schema keys</h2>
-        {groups.length === 0 ? (
-          <p className="muted">No schemas yet — install the default or create a new key above.</p>
-        ) : (
-          <ul className="list schema-card-list">
-            {groups.map((g) => (
-              <li key={g.schema_key} className="schema-card">
-                <h3 className="schema-card-title">
-                  <code>{g.schema_key}</code>
-                </h3>
-                <ul className="list schema-version-sublist">
-                  {g.versions.map((v) => (
-                    <li key={v.id} className="schema-version-block">
-                      <div className="schema-version-row">
-                        <span>
-                          <strong>{v.version_label}</strong>{" "}
-                          <span className="muted">
-                            ({v.status}) {v.created_at ? `· ${v.created_at}` : ""}
-                          </span>
-                        </span>
-                        <span className="schema-version-actions">
-                          <button type="button" className="btn-inline" disabled={busy} onClick={() => void toggleDefinition(v.id)}>
-                            {expandedId === v.id ? "Hide" : "Show"} definition
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-inline"
-                            disabled={busy}
-                            onClick={() => useAsRevisionBase(v, g.schema_key)}
-                          >
-                            Use as base for new revision
-                          </button>
-                          <button
-                            type="button"
-                            className="danger btn-inline"
-                            disabled={busy}
-                            onClick={() => void removeVersion(v.id, `${g.schema_key}@${v.version_label}`)}
-                          >
-                            Delete
-                          </button>
-                        </span>
-                      </div>
-                      {detailLoading === v.id ? <p className="muted small">Loading…</p> : null}
-                      {expandedId === v.id && detailById[v.id] ? (
-                        <pre className="schema-json-view">{JSON.stringify(detailById[v.id].body, null, 2)}</pre>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        {asideOpen ? (
+          <aside className="schemas-aside" aria-label="Schema editor">
+            {editorMode === "revision" && revisionDraft ? (
+              <SchemaRevisionEditor
+                projectId={projectId}
+                schemaKey={revisionDraft.schema_key}
+                jsonText={revisionDraft.jsonText}
+                busy={busy}
+                onSchemaKeyChange={(key) => setRevisionDraft((d) => (d ? { ...d, schema_key: key } : null))}
+                onJsonTextChange={(text) => setRevisionDraft((d) => (d ? { ...d, jsonText: text } : null))}
+                onPublish={publishRevision}
+                onCancel={() => {
+                  setRevisionDraft(null);
+                  setEditorMode("none");
+                }}
+                onError={setError}
+              />
+            ) : null}
+            {editorMode === "new-key" ? (
+              <SchemaNewKeyPanel
+                newKey={newKey}
+                newKeyBody={newKeyBody}
+                busy={busy}
+                wineTemplate={WINE_QUALITY_TEMPLATE}
+                onKeyChange={setNewKey}
+                onBodyChange={setNewKeyBody}
+                onSubmit={publishNewSchemaFirstRevision}
+                onClose={() => setEditorMode("none")}
+                onError={setError}
+              />
+            ) : null}
+          </aside>
+        ) : null}
+      </div>
     </div>
   );
 }

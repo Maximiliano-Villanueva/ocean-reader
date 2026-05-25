@@ -47,9 +47,16 @@ async def test_corpus_row_expected_status(case: dict, variant: str, wine_schema:
         llm_fallback=False,
     )
     assert report.status == case["expected_status"]
-    for exp in case["expected_errors"]:
-        matching = [e for e in report.errors if e.field == exp["field"] and e.rule == exp["rule"]]
-        assert matching, f"Expected error {exp}, got {[(e.field, e.rule) for e in report.errors]}"
+    exp_errs = case["expected_errors"]
+    got_pairs = {(e.field, e.rule) for e in report.errors}
+    exp_pairs = {(e["field"], e["rule"]) for e in exp_errs}
+    assert exp_pairs == got_pairs, f"Errors mismatch: expected {exp_pairs}, got {got_pairs}"
+    amb_exp = case.get("expected_ambiguous_fields")
+    if amb_exp is not None:
+        got_amb = {a.field for a in report.ambiguous_fields}
+        assert got_amb == set(amb_exp), f"Ambiguous fields: expected {set(amb_exp)}, got {got_amb}"
+    elif case["expected_status"] == "AMBIGUOUS":
+        assert {a.field for a in report.ambiguous_fields}, "AMBIGUOUS status requires at least one ambiguous field"
 
 
 @pytest.mark.asyncio
