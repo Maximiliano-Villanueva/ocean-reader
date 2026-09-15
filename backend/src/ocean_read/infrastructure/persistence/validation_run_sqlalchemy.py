@@ -126,6 +126,7 @@ class SqlAlchemyValidationRunRepository:
         return {
             "id": str(r.id),
             "project_id": str(r.project_id),
+            "validation_schema_id": str(r.validation_schema_id) if r.validation_schema_id else None,
             "schema_key": r.schema_key,
             "version_label": r.version_label,
             "document_filename": r.document_filename,
@@ -137,6 +138,9 @@ class SqlAlchemyValidationRunRepository:
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "archived_at": r.archived_at.isoformat() if r.archived_at else None,
             "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
+            "parent_run_id": str(r.parent_run_id) if r.parent_run_id else None,
+            "revision_number": int(r.revision_number or 1),
+            "attributes": dict(r.attributes or {}),
         }
 
     async def insert(
@@ -153,6 +157,9 @@ class SqlAlchemyValidationRunRepository:
         pdf_hash: str,
         snapshots: dict[str, Any] | None,
         pdf_relative_path: str | None,
+        parent_run_id: uuid.UUID | None = None,
+        revision_number: int = 1,
+        attributes: dict[str, str | None] | None = None,
     ) -> uuid.UUID:
         row = ValidationRun(
             id=run_id,
@@ -166,6 +173,9 @@ class SqlAlchemyValidationRunRepository:
             pdf_hash=pdf_hash,
             snapshots=snapshots,
             pdf_relative_path=pdf_relative_path,
+            parent_run_id=parent_run_id,
+            revision_number=revision_number,
+            attributes=dict(attributes or {}),
         )
         self._session.add(row)
         await self._session.flush()
@@ -235,4 +245,7 @@ def _run_summary_dict(r: ValidationRun) -> dict[str, Any]:
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "archived_at": r.archived_at.isoformat() if r.archived_at else None,
         "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
+        "parent_run_id": str(r.parent_run_id) if r.parent_run_id else None,
+        "revision_number": int(r.revision_number or 1),
+        "attributes": dict(r.attributes or {}),
     }

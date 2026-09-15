@@ -243,3 +243,41 @@ async def test_m2_list_runs_filter_by_version_and_document_substring(validation_
         assert all(
             i["version_label"] == "1.0" and i["schema_key"] == "wine_schema" for i in by_ver.json()["items"]
         )
+
+
+@pytest.mark.asyncio
+async def test_manual_correction_creates_run_revision_and_revalidates(validation_api_seed: dict) -> None:
+    """POST revisions saves corrected values and updates outcome."""
+
+    pid = validation_api_seed["project_id"]
+    pdf = _wine_pdf_bytes(alcohol_line="Alcohol: 18%")
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            "/api/validate-document",
+            data={
+                "project_id": str(pid),
+                "schema_id": "wine_schema",
+                "schema_version": "1.0",
+            },
+            files={"document": ("fail_alcohol.pdf", io.BytesIO(pdf), "application/pdf")},
+        )
+        assert created.status_code == 200, created.text
+        parent_id = created.json()["run_id"]
+        assert created.json()["status"] == "FAIL"
+
+        revised = await client.post(
+            f"/api/projects/{pid}/validation-runs/{parent_id}/revisions",
+            json={"corrections": {"alcohol": 9.4}, "note": "Lab confirmed 9.4%"},
+        )
+        assert revised.status_code == 201, revised.text
+        body = revised.json()
+        assert body["parent_run_id"] == parent_id
+        assert body["revision_number"] == 2
+        assert body["outcome"] == "PASS"
+        assert body["report"]["resolved_values"]["alcohol"] == 9.4
+        assert body["report"]["manual_corrections"]["alcohol"]["to"] == 9.4
+
+        parent = await client.get(f"/api/projects/{pid}/validation-runs/{parent_id}")
+        assert parent.status_code == 200
+        assert parent.json()["outcome"] == "FAIL"

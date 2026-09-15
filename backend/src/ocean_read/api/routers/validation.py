@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import PurePosixPath
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
@@ -15,8 +17,11 @@ from ocean_read.config import get_settings
 from ocean_read.domain.validation.default_wine_schema import DEFAULT_WINE_QUALITY_SCHEMA_BODY
 from ocean_read.domain.validation.lifecycle import can_use_for_validation
 from ocean_read.domain.validation.revision import suggest_next_version_label
+from ocean_read.domain.validation.run_attributes import normalize_run_attributes
+from ocean_read.domain.validation.run_manual_revision import apply_manual_field_corrections
 from ocean_read.domain.validation.pipeline_result import PipelineValidationResult
 from ocean_read.domain.validation.schema_dsl import collect_schema_dsl_errors
+from ocean_read.domain.validation.schema_normalizer import normalize_schema_body, schema_has_open_ended
 from ocean_read.domain.validation.schema_expression_assist import suggest_cross_field_rule_from_nl
 from ocean_read.infrastructure.persistence.validation_run_sqlalchemy import SqlAlchemyValidationRunRepository
 from ocean_read.infrastructure.persistence.validation_schema_sqlalchemy import SqlAlchemyValidationSchemaRepository
@@ -29,6 +34,7 @@ from ocean_read.schemas import (
     ValidateDocumentResponse,
     ValidationEvidenceOut,
     ValidationFieldErrorOut,
+    ValidationRunCorrectionCreate,
     ValidationRunDetailOut,
     ValidationRunLifecyclePatch,
     ValidationRunLifecycleStateOut,
@@ -38,7 +44,17 @@ from ocean_read.schemas import (
     ValidationSchemaVersionCreate,
     ValidationSchemaVersionDetailOut,
     ValidationSchemaVersionSummary,
+    SchemaAgentChatIn,
+    SchemaAgentChatOut,
+    SchemaAgentSamplePdfOut,
+    SchemaJudgeAnalyzeIn,
+    SchemaJudgeAnalyzeOut,
+    SchemaPreviewOut,
+    ValidateSchemaBodyIn,
+    ValidateSchemaBodyOut,
 )
+from ocean_read.services.schema_judge import _fallback_feedback, analyze_preview_for_authoring
+from ocean_read.domain.validation.pdf_blocks import parse_pdf_blocks
 from ocean_read.services.validation_pipeline import run_wine_pdf_validation
 
 router = APIRouter(tags=["Validation"])
@@ -82,6 +98,32 @@ def _report_to_response(report: PipelineValidationResult, schema_key: str, versi
                 evidence=ev_rule,
             )
         )
+    from ocean_read.schemas import OpenEndedEvidenceOut, OpenEndedFieldResultOut
+
+    oe_out: list[OpenEndedFieldResultOut] = []
+    for oe in report.open_ended_results:
+        oe_out.append(
+            OpenEndedFieldResultOut(
+                field=oe.field,
+                extracted_value=oe.extracted_value,
+                evaluation=oe.evaluation,
+                informative_only=oe.informative_only,
+                evidence=[
+                    OpenEndedEvidenceOut(
+                        text=e.text,
+                        block_id=e.block_id,
+                        page=e.page,
+                        bbox=e.bbox,
+                    )
+                    for e in oe.evidence
+                ],
+            )
+        )
+    extraction_meta = None
+    if report.pipeline_snapshots:
+        raw_meta = report.pipeline_snapshots.get("extraction_meta")
+        if isinstance(raw_meta, dict):
+            extraction_meta = raw_meta
     return ValidateDocumentResponse(
         status=report.status,
         schema_id=schema_key,
@@ -91,6 +133,8 @@ def _report_to_response(report: PipelineValidationResult, schema_key: str, versi
         schema_snapshot=report.schema_body_snapshot,
         resolved_values=report.resolved_values,
         field_rule_outcomes=fro_list,
+        open_ended_results=oe_out,
+        extraction_meta=extraction_meta,
     )
 
 
@@ -215,7 +259,7 @@ async def create_validation_schema_version(
         labels = [str(x["version_label"]) for x in existing]
         sv = suggest_next_version_label(labels)
 
-    spec = body.body if body.body is not None else DEFAULT_WINE_QUALITY_SCHEMA_BODY
+    spec = normalize_schema_body(body.body if body.body is not None else DEFAULT_WINE_QUALITY_SCHEMA_BODY)
     dsl_errors = collect_schema_dsl_errors(spec)
     if dsl_errors:
         raise HTTPException(status_code=400, detail={"schema_dsl_errors": dsl_errors})
@@ -300,6 +344,26 @@ async def list_validation_runs(
     return ValidationRunsPage(items=items, total=total, page=page, page_size=ps)
 
 
+def _run_detail_from_row(row: dict[str, Any]) -> ValidationRunDetailOut:
+  rep = ValidateDocumentResponse.model_validate(row["report"])
+  return ValidationRunDetailOut(
+      id=row["id"],
+      schema_key=row["schema_key"],
+      version_label=row["version_label"],
+      document_filename=row["document_filename"],
+      outcome=row["outcome"],
+      created_at=row["created_at"],
+      report=rep,
+      has_pdf=bool(row["pdf_relative_path"]),
+      pdf_hash=row["pdf_hash"],
+      archived_at=row.get("archived_at"),
+      deleted_at=row.get("deleted_at"),
+      parent_run_id=row.get("parent_run_id"),
+      revision_number=int(row.get("revision_number") or 1),
+      attributes=dict(row.get("attributes") or {}),
+  )
+
+
 @router.get("/projects/{project_id}/validation-runs/{run_id}", response_model=ValidationRunDetailOut)
 async def get_validation_run(project_id: uuid.UUID, run_id: uuid.UUID, db: SessionDep) -> ValidationRunDetailOut:
     await require_project(db, project_id)
@@ -307,20 +371,70 @@ async def get_validation_run(project_id: uuid.UUID, run_id: uuid.UUID, db: Sessi
     row = await repo.get(project_id, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Validation run not found")
-    rep = ValidateDocumentResponse.model_validate(row["report"])
-    return ValidationRunDetailOut(
-        id=row["id"],
-        schema_key=row["schema_key"],
-        version_label=row["version_label"],
-        document_filename=row["document_filename"],
-        outcome=row["outcome"],
-        created_at=row["created_at"],
-        report=rep,
-        has_pdf=bool(row["pdf_relative_path"]),
-        pdf_hash=row["pdf_hash"],
-        archived_at=row.get("archived_at"),
-        deleted_at=row.get("deleted_at"),
+    return _run_detail_from_row(row)
+
+
+@router.post(
+    "/projects/{project_id}/validation-runs/{run_id}/revisions",
+    response_model=ValidationRunDetailOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_validation_run_revision(
+    project_id: uuid.UUID,
+    run_id: uuid.UUID,
+    body: ValidationRunCorrectionCreate,
+    db: SessionDep,
+) -> ValidationRunDetailOut:
+    """Save human field corrections as a new run revision and revalidate PASS/FAIL/AMBIGUOUS."""
+
+    await require_project(db, project_id)
+    repo = SqlAlchemyValidationRunRepository(db)
+    parent = await repo.get(project_id, run_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="Validation run not found")
+
+    try:
+        updated_report = apply_manual_field_corrections(dict(parent["report"]), body.corrections)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if body.note:
+        updated_report["revision_note"] = body.note.strip()
+
+    new_run_id = uuid.uuid4()
+    updated_report["run_id"] = str(new_run_id)
+    parent_revision = int(parent.get("revision_number") or 1)
+
+    if parent.get("validation_schema_id"):
+        try:
+            schema_uuid = uuid.UUID(str(parent["validation_schema_id"]))
+        except ValueError:
+            schema_uuid = None
+    else:
+        schema_uuid = None
+
+    await repo.insert(
+        run_id=new_run_id,
+        project_id=project_id,
+        validation_schema_id=schema_uuid,
+        schema_key=parent["schema_key"],
+        version_label=parent["version_label"],
+        document_filename=parent["document_filename"],
+        outcome=str(updated_report["status"]),
+        report=updated_report,
+        pdf_hash=parent["pdf_hash"],
+        snapshots=parent.get("snapshots"),
+        pdf_relative_path=parent.get("pdf_relative_path"),
+        parent_run_id=run_id,
+        revision_number=parent_revision + 1,
+        attributes=dict(parent.get("attributes") or {}),
     )
+    await db.commit()
+
+    created = await repo.get(project_id, new_run_id)
+    if created is None:
+        raise HTTPException(status_code=500, detail="Failed to load created revision")
+    return _run_detail_from_row(created)
 
 
 @router.patch(
@@ -480,6 +594,10 @@ async def validate_document(
     schema_id: str = Form(...),
     schema_version: str = Form(...),
     document: UploadFile = File(...),
+    attributes: str | None = Form(
+        default=None,
+        description='Optional JSON object or list of {"key","value"} tags for this validation.',
+    ),
 ) -> ValidateDocumentResponse:
     """Run PDF → extraction → resolution → validation for one persisted schema version."""
 
@@ -504,6 +622,14 @@ async def validate_document(
     name = (document.filename or "").lower()
     if "pdf" not in mime and not name.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Expected application/pdf")
+
+    run_attributes: dict[str, str | None] = {}
+    if attributes and attributes.strip():
+        try:
+            parsed_attrs = json.loads(attributes)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="attributes must be valid JSON") from exc
+        run_attributes = normalize_run_attributes(parsed_attrs)
 
     report = await run_wine_pdf_validation(
         data,
@@ -541,6 +667,196 @@ async def validate_document(
         pdf_hash=report.pdf_hash,
         snapshots=report.pipeline_snapshots,
         pdf_relative_path=rel_path,
+        attributes=run_attributes,
     )
     await db.commit()
     return final_response
+
+
+@router.post(
+    "/projects/{project_id}/validation-schemas/validate-body",
+    response_model=ValidateSchemaBodyOut,
+    tags=["Validation", "Schema authoring"],
+)
+async def validate_schema_body_for_project(
+    project_id: uuid.UUID,
+    payload: ValidateSchemaBodyIn,
+    db: SessionDep,
+) -> ValidateSchemaBodyOut:
+    """DSL validation for draft schemas in Schema Studio (no version row required)."""
+
+    await require_project(db, project_id)
+    normalized = normalize_schema_body(payload.body)
+    errs = collect_schema_dsl_errors(normalized)
+    return ValidateSchemaBodyOut(ok=not errs, errors=errs, normalized_body=normalized)
+
+
+def _preview_feedback_summary(response: ValidateDocumentResponse) -> str:
+    """Compact text for the schema authoring agent."""
+
+    lines: list[str] = [f"Outcome: {response.status}"]
+    if response.resolved_values:
+        resolved = ", ".join(f"{k}={v!r}" for k, v in sorted(response.resolved_values.items()))
+        lines.append(f"Resolved: {resolved}")
+    if response.results:
+        fails = ", ".join(f"{e.field} ({e.rule})" for e in response.results)
+        lines.append(f"Validation failures: {fails}")
+    if response.ambiguous_fields:
+        amb = ", ".join(f"{a.field} ({a.candidate_count} candidates)" for a in response.ambiguous_fields)
+        lines.append(f"Ambiguous: {amb}")
+    if response.open_ended_results:
+        oe_parts: list[str] = []
+        for oe in response.open_ended_results:
+            tag = oe.evaluation or "no evaluation"
+            if oe.informative_only:
+                tag = f"informative: {oe.extracted_value!r}"
+            oe_parts.append(f"{oe.field}={tag}")
+        lines.append(f"Open-ended: {'; '.join(oe_parts)}")
+    return "\n".join(lines)
+
+
+@router.post(
+    "/projects/{project_id}/validation-schemas/preview",
+    response_model=SchemaPreviewOut,
+    tags=["Validation", "Schema authoring"],
+)
+async def preview_validation_on_draft(
+    project_id: uuid.UUID,
+    db: SessionDep,
+    document: UploadFile = File(...),
+    schema_body: str = Form(...),
+) -> SchemaPreviewOut:
+    """Run the full validation pipeline on a draft schema + sample PDF without persisting a run."""
+
+    await require_project(db, project_id)
+    try:
+        raw_body = json.loads(schema_body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"schema_body must be valid JSON: {exc}") from exc
+    if not isinstance(raw_body, dict):
+        raise HTTPException(status_code=400, detail="schema_body must be a JSON object")
+
+    normalized = normalize_schema_body(raw_body)
+    dsl_errors = collect_schema_dsl_errors(normalized)
+    if dsl_errors:
+        return SchemaPreviewOut(dsl_ok=False, dsl_errors=dsl_errors, validation=None)
+
+    data = await document.read()
+    if len(data) > _MAX_VALIDATE_BYTES:
+        raise HTTPException(status_code=413, detail="PDF exceeds validation size limit")
+    mime = (document.content_type or "").lower()
+    name = (document.filename or "").lower()
+    if "pdf" not in mime and not name.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Expected application/pdf")
+
+    report = await run_wine_pdf_validation(
+        data,
+        schema_body=normalized,
+        schema_key="preview",
+        version_label="draft",
+    )
+    validation = _report_to_response(report, "preview", "draft")
+    return SchemaPreviewOut(dsl_ok=True, dsl_errors=[], validation=validation)
+
+
+@router.post(
+    "/projects/{project_id}/schema-judge/analyze",
+    response_model=SchemaJudgeAnalyzeOut,
+    tags=["Validation", "Schema authoring"],
+)
+async def schema_judge_analyze(
+    project_id: uuid.UUID,
+    payload: SchemaJudgeAnalyzeIn,
+    db: SessionDep,
+) -> SchemaJudgeAnalyzeOut:
+    """LLM judge critique of a draft schema + optional preview run (feeds schema agent A2A loop)."""
+
+    await require_project(db, project_id)
+    settings = get_settings()
+    normalized = normalize_schema_body(payload.schema_body)
+    validation_dict = payload.validation.model_dump() if payload.validation else None
+    if settings.validation_schema_judge_enabled:
+        raw = await analyze_preview_for_authoring(
+            schema_body=normalized,
+            validation=validation_dict,
+            dsl_errors=list(payload.dsl_errors),
+        )
+        return SchemaJudgeAnalyzeOut.model_validate(raw)
+    raw = _fallback_feedback(
+        schema_body=normalized,
+        validation=validation_dict,
+        dsl_errors=list(payload.dsl_errors),
+    )
+    return SchemaJudgeAnalyzeOut.model_validate(raw)
+
+
+@router.post(
+    "/projects/{project_id}/schema-agent/chat",
+    response_model=SchemaAgentChatOut,
+    tags=["Validation", "Schema agent"],
+)
+async def schema_agent_chat(project_id: uuid.UUID, payload: SchemaAgentChatIn, db: SessionDep) -> SchemaAgentChatOut:
+    """Forward chat + current schema draft to the ADK schema-agent service (stateless)."""
+
+    await require_project(db, project_id)
+    settings = get_settings()
+    url = f"{settings.schema_agent_url.rstrip('/')}/chat"
+    body = {
+        "messages": [m.model_dump() for m in payload.messages],
+        "schema_body": payload.schema_body,
+        "sample_pdf_note": payload.sample_pdf_note,
+        "validation_feedback": payload.validation_feedback.model_dump() if payload.validation_feedback else None,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            r = await client.post(url, json=body)
+            if r.status_code >= 400:
+                detail = r.text[:500]
+                try:
+                    payload = r.json()
+                    if isinstance(payload, dict) and payload.get("detail"):
+                        detail = str(payload["detail"])
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status.HTTP_502_BAD_GATEWAY if r.status_code == 502 else r.status_code,
+                    detail=detail,
+                )
+            data = r.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=f"Schema agent unavailable at {url}: {exc}",
+        ) from exc
+    return SchemaAgentChatOut.model_validate(data)
+
+
+@router.post(
+    "/projects/{project_id}/schema-agent/sample-pdf-text",
+    response_model=SchemaAgentSamplePdfOut,
+    tags=["Validation", "Schema agent"],
+)
+async def schema_agent_sample_pdf_text(
+    project_id: uuid.UUID,
+    db: SessionDep,
+    document: UploadFile = File(...),
+) -> SchemaAgentSamplePdfOut:
+    """Extract layout text from an optional sample PDF for agent context (not stored)."""
+
+    await require_project(db, project_id)
+    data = await document.read()
+    if len(data) > _MAX_VALIDATE_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
+    blocks = parse_pdf_blocks(data)
+    pages = {b.page for b in blocks}
+    lines: list[str] = []
+    for b in blocks[:100]:
+        lines.append(f"[p{b.page} #{b.id}] {(b.text or '').strip()}")
+    preview = "\n".join(lines)[:14000]
+    return SchemaAgentSamplePdfOut(
+        text_preview=preview,
+        page_count=max(pages) if pages else 0,
+        block_count=len(blocks),
+    )

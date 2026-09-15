@@ -10,7 +10,7 @@ export type SchemaBodySummaryProps = {
 };
 
 export default function SchemaBodySummaryView({ summary, compact = false }: SchemaBodySummaryProps) {
-  const { fields, rules, crossFieldRules, groups, version } = summary;
+  const { fields, rules, crossFieldRules, groups, openEnded, version } = summary;
 
   return (
     <div className={`schema-summary ${compact ? "schema-summary--compact" : ""}`.trim()}>
@@ -23,6 +23,7 @@ export default function SchemaBodySummaryView({ summary, compact = false }: Sche
           ? ` · ${crossFieldRules.length} cross-field`
           : ""}
         {groups.length > 0 ? ` · ${groups.length} repeating group${groups.length === 1 ? "" : "s"}` : ""}
+        {openEnded.length > 0 ? ` · ${openEnded.length} open-ended` : ""}
       </p>
 
       {fields.length > 0 ? (
@@ -68,6 +69,25 @@ export default function SchemaBodySummaryView({ summary, compact = false }: Sche
                 <span className="schema-rule-card-id">{cf.id}</span>
                 <code className="schema-rule-card-expr">{cf.expression}</code>
                 <span className="muted tiny">Fields: {cf.fields.join(", ") || "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {openEnded.length > 0 ? (
+        <div className="schema-summary-section">
+          <h4 className="schema-summary-heading">Open-ended (LLM)</h4>
+          <ul className="schema-rule-cards">
+            {openEnded.map((oe) => (
+              <li key={oe.name} className="schema-rule-card">
+                <span className="schema-rule-card-id">{oe.name}</span>
+                <span className="muted small">{oe.extractPreview}</span>
+                <span className="muted tiny">
+                  {oe.informativeOnly ? "Informative only" : "Affects outcome"}
+                  {oe.linkEvidence ? " · PDF evidence" : " · No PDF link"}
+                  {oe.dependsOn.length > 0 ? ` · Uses: ${oe.dependsOn.join(", ")}` : ""}
+                </span>
               </li>
             ))}
           </ul>

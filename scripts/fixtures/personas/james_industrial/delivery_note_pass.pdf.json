@@ -1,0 +1,7 @@
+{
+  "persona": "james",
+  "file": "delivery_note_pass.pdf",
+  "schema_key": "delivery_note",
+  "expected_outcome": "PASS",
+  "audit_note": "Inbound shipment OK"
+}

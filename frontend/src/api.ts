@@ -108,18 +108,36 @@ export type FieldRuleOutcomeOut = {
   evidence: ValidationEvidenceOut | null;
 };
 
+export type OpenEndedEvidenceOut = {
+  text: string;
+  block_id: string;
+  page: number;
+  bbox: number[] | null;
+};
+
+export type OpenEndedFieldResultOut = {
+  field: string;
+  extracted_value: string | null;
+  evaluation: "pass" | "fail" | "ambiguous" | null;
+  informative_only: boolean;
+  evidence: OpenEndedEvidenceOut[];
+};
+
 export type ValidateDocumentResponse = {
   status: "PASS" | "FAIL" | "AMBIGUOUS";
   schema_id: string;
   schema_version: string;
   results: ValidationFieldErrorOut[];
   ambiguous_fields: AmbiguousFieldOut[];
+  open_ended_results?: OpenEndedFieldResultOut[];
   /** Full schema JSON applied for this run (may be absent on older persisted runs). */
   schema_snapshot?: Record<string, unknown> | null;
   /** Resolved extraction values per field (PASS/FAIL; absent when ambiguous or legacy). */
   resolved_values?: Record<string, unknown> | null;
   field_rule_outcomes?: FieldRuleOutcomeOut[];
   run_id?: string | null;
+  /** e.g. { vision_fallback_used: true } when scanned pages were read via multimodal LLM */
+  extraction_meta?: Record<string, unknown> | null;
 };
 
 export type ValidationRunSummary = {
@@ -133,6 +151,49 @@ export type ValidationRunSummary = {
   archived_at?: string | null;
   /** Set when the run was soft-deleted from default history. */
   deleted_at?: string | null;
+  attributes?: Record<string, string | null>;
+};
+
+export type CohortAttributeFilter = { key: string; value: string | null };
+
+export type CohortFilters = {
+  schema_key?: string | null;
+  version_label?: string | null;
+  outcomes: string[];
+  attributes: CohortAttributeFilter[];
+};
+
+export type ValidationCohortOut = {
+  id: string;
+  name: string;
+  description?: string | null;
+  filters: CohortFilters;
+  pass_threshold_pct: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type CohortEvaluationOut = {
+  total: number;
+  pass_count: number;
+  fail_count: number;
+  ambiguous_count: number;
+  pass_rate_pct: number;
+  pass_threshold_pct: number;
+  meets_threshold: boolean;
+  items: ValidationRunSummary[];
+};
+
+export type ValidationAttributeVocabularyOut = {
+  keys: string[];
+  values_by_key: Record<string, string[]>;
+};
+
+export type ValidationCohortCreateInput = {
+  name: string;
+  description?: string | null;
+  filters: CohortFilters;
+  pass_threshold_pct: number;
 };
 
 export type ValidationRunsPageResponse = {
@@ -155,6 +216,14 @@ export type ValidationRunDetailOut = {
   pdf_hash?: string;
   archived_at?: string | null;
   deleted_at?: string | null;
+  parent_run_id?: string | null;
+  revision_number?: number;
+  attributes?: Record<string, string | null>;
+};
+
+export type ValidationRunCorrectionCreate = {
+  corrections: Record<string, unknown>;
+  note?: string | null;
 };
 
 export type LogContainer = {
@@ -194,17 +263,88 @@ export const api = {
         { method: "POST", body: JSON.stringify(body) },
       ),
 
+    validateSchemaBody: (projectId: string, body: Record<string, unknown>) =>
+      jsonFetch<{ ok: boolean; errors: string[]; normalized_body: Record<string, unknown> }>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-schemas/validate-body`,
+        { method: "POST", body: JSON.stringify({ body }) },
+      ),
+
+    schemaJudgeAnalyze: (
+      projectId: string,
+      body: {
+        schema_body: Record<string, unknown>;
+        dsl_errors?: string[];
+        validation?: ValidateDocumentResponse | null;
+      },
+    ) =>
+      jsonFetch<{ summary: string; recommendations: string[]; priority: string }>(
+        `/api/projects/${encodeURIComponent(projectId)}/schema-judge/analyze`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+
+    previewSchema: async (projectId: string, schemaJsonText: string, file: File) => {
+      const fd = new FormData();
+      fd.append("schema_body", schemaJsonText);
+      fd.append("document", file);
+      const resp = await fetch(
+        `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/validation-schemas/preview`,
+        { method: "POST", headers: withEdgeHeaders(), body: fd },
+      );
+      if (!resp.ok) throw new Error(await resp.text());
+      return resp.json() as Promise<{
+        dsl_ok: boolean;
+        dsl_errors: string[];
+        validation: ValidateDocumentResponse | null;
+      }>;
+    },
+
+    schemaAgentChat: (
+      projectId: string,
+      body: {
+        messages: { role: string; content: string }[];
+        schema_body: Record<string, unknown>;
+        sample_pdf_note?: string | null;
+        validation_feedback?: {
+          dsl_ok: boolean;
+          dsl_errors: string[];
+          preview_status?: string | null;
+          preview_summary?: string | null;
+          judge_summary?: string | null;
+          judge_recommendations?: string[];
+        };
+      },
+    ) =>
+      jsonFetch<{ reply: string; schema_body: Record<string, unknown> }>(
+        `/api/projects/${encodeURIComponent(projectId)}/schema-agent/chat`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+
+    schemaAgentSamplePdf: async (projectId: string, file: File) => {
+      const fd = new FormData();
+      fd.append("document", file);
+      const resp = await fetch(
+        `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/schema-agent/sample-pdf-text`,
+        { method: "POST", headers: withEdgeHeaders(), body: fd },
+      );
+      if (!resp.ok) throw new Error(await resp.text());
+      return resp.json() as Promise<{ text_preview: string; page_count: number; block_count: number }>;
+    },
+
     validateDocument: async (
       projectId: string,
       schemaId: string,
       schemaVersion: string,
       file: File,
+      attributes?: Record<string, string | null>,
     ): Promise<ValidateDocumentResponse> => {
       const fd = new FormData();
       fd.append("project_id", projectId);
       fd.append("schema_id", schemaId);
       fd.append("schema_version", schemaVersion);
       fd.append("document", file);
+      if (attributes && Object.keys(attributes).length > 0) {
+        fd.append("attributes", JSON.stringify(attributes));
+      }
       const resp = await fetch(`${API_BASE}/api/validate-document`, {
         method: "POST",
         headers: withEdgeHeaders(),
@@ -243,6 +383,12 @@ export const api = {
     getRun: (projectId: string, runId: string) =>
       jsonFetch<ValidationRunDetailOut>(
         `/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}`,
+      ),
+
+    createRunRevision: (projectId: string, runId: string, body: ValidationRunCorrectionCreate) =>
+      jsonFetch<ValidationRunDetailOut>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-runs/${encodeURIComponent(runId)}/revisions`,
+        { method: "POST", body: JSON.stringify(body) },
       ),
 
     /** Archive a run (hidden from default list; recover with restore or include_hidden list). */
@@ -314,6 +460,39 @@ export const api = {
       const name = filename.trim() || "document.pdf";
       return new File([blob], name, { type: blob.type || "application/pdf" });
     },
+
+    attributeVocabulary: (projectId: string) =>
+      jsonFetch<ValidationAttributeVocabularyOut>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-attributes`,
+      ),
+
+    listCohorts: (projectId: string) =>
+      jsonFetch<ValidationCohortOut[]>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-cohorts`,
+      ),
+
+    createCohort: (projectId: string, body: ValidationCohortCreateInput) =>
+      jsonFetch<ValidationCohortOut>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-cohorts`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+
+    deleteCohort: (projectId: string, cohortId: string) =>
+      jsonFetch<{ status: string }>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-cohorts/${encodeURIComponent(cohortId)}`,
+        { method: "DELETE" },
+      ),
+
+    evaluateCohort: (projectId: string, body: ValidationCohortCreateInput) =>
+      jsonFetch<CohortEvaluationOut>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-cohorts/evaluate`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+
+    evaluateSavedCohort: (projectId: string, cohortId: string) =>
+      jsonFetch<CohortEvaluationOut>(
+        `/api/projects/${encodeURIComponent(projectId)}/validation-cohorts/${encodeURIComponent(cohortId)}/evaluate`,
+      ),
   },
 
   logs: {

@@ -32,8 +32,34 @@ class Settings(BaseSettings):
     # Validation pipeline: optional LLM fallback after regex/layout (temperature 0; internal only).
     validation_llm_fallback_enabled: bool = Field(default=False, alias="VALIDATION_LLM_FALLBACK_ENABLED")
 
+    # When layout text is sparse or required fields missing: multimodal page images → LLM (vLLM, else Ollama).
+    validation_llm_vision_enabled: bool = Field(default=False, alias="VALIDATION_LLM_VISION_ENABLED")
+    validation_llm_vision_max_pages: int = Field(default=4, alias="VALIDATION_LLM_VISION_MAX_PAGES")
+
     # Schema editor: optional Ollama assist to draft ``cross_field_rules`` from natural language (M3).
     validation_schema_llm_assist_enabled: bool = Field(default=False, alias="VALIDATION_SCHEMA_LLM_ASSIST_ENABLED")
+
+    validation_open_ended_enabled: bool = Field(default=False, alias="VALIDATION_OPEN_ENDED_ENABLED")
+
+    # Two-phase LLM: infer document structure (regions/roles) then extract fields with layout-aware blocks.
+    validation_document_understanding_enabled: bool = Field(
+        default=True,
+        alias="VALIDATION_DOCUMENT_UNDERSTANDING_ENABLED",
+    )
+
+    # LLM judge for layout/LLM/vision extraction winners (regex is never judged).
+    validation_extraction_judge_enabled: bool = Field(
+        default=True,
+        alias="VALIDATION_EXTRACTION_JUDGE_ENABLED",
+    )
+
+    # Schema studio: LLM critique of preview runs for the authoring agent.
+    validation_schema_judge_enabled: bool = Field(
+        default=True,
+        alias="VALIDATION_SCHEMA_JUDGE_ENABLED",
+    )
+
+    schema_agent_url: str = Field(default="http://schema-agent:8081", alias="SCHEMA_AGENT_URL")
 
 
 @lru_cache

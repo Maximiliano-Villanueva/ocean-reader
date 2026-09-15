@@ -43,6 +43,10 @@ class Project(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="project",
         passive_deletes=True,
     )
+    validation_cohorts: Mapped[list["ValidationCohort"]] = relationship(
+        back_populates="project",
+        passive_deletes=True,
+    )
 
 
 class ValidationSchema(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -91,5 +95,30 @@ class ValidationRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     pdf_relative_path: Mapped[Optional[str]] = mapped_column(String(4096), nullable=True)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    parent_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("validation_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    revision_number: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
 
     project: Mapped["Project"] = relationship(back_populates="validation_runs")
+
+
+class ValidationCohort(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Saved filter + pass threshold for the Insights tab (cohort views)."""
+
+    __tablename__ = "validation_cohorts"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    filters: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    pass_threshold_pct: Mapped[float] = mapped_column(nullable=False, default=100.0, server_default="100")
+
+    project: Mapped["Project"] = relationship(back_populates="validation_cohorts")

@@ -1,0 +1,8 @@
+{
+  "name": "ocean-read-e2e",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.49.0"
+  }
+}

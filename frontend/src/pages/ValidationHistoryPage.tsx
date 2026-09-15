@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
+import ValidationAuditReport from "../components/validation/ValidationAuditReport";
+import ValidationDatasetExport from "../components/validation/ValidationDatasetExport";
+import ValidationOutcomeGuide from "../components/validation/ValidationOutcomeGuide";
 import ValidationReRunDialog from "../components/validation/ValidationReRunDialog";
+import ValidationRunRowActions from "../components/validation/ValidationRunRowActions";
+import { formatSchemaKey } from "../lib/displayLabels";
+import { formatRunTimestamp } from "../lib/formatDate";
 import {
   api,
+  type Project,
   type ValidationRunSummary,
   type ValidationSchemaGroupOut,
 } from "../api";
@@ -15,6 +22,7 @@ const OUTCOME_FILTERS = ["", "PASS", "FAIL", "AMBIGUOUS"] as const;
 export default function ValidationHistoryPage() {
   const { projectId = "" } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [schemaGroups, setSchemaGroups] = useState<ValidationSchemaGroupOut[]>([]);
   const [items, setItems] = useState<ValidationRunSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -23,12 +31,46 @@ export default function ValidationHistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [filterSchemaKey, setFilterSchemaKey] = useState("");
   const [filterVersionLabel, setFilterVersionLabel] = useState("");
-  const [filterOutcome, setFilterOutcome] = useState("");
+  const [filterOutcome, setFilterOutcome] = useState(() => {
+    const fromUrl = searchParams.get("outcome") ?? "";
+    return OUTCOME_FILTERS.includes(fromUrl as (typeof OUTCOME_FILTERS)[number]) ? fromUrl : "";
+  });
   const [documentSearchInput, setDocumentSearchInput] = useState("");
   const [documentSearch, setDocumentSearch] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reRunTarget, setReRunTarget] = useState<ValidationRunSummary | null>(null);
+  const [project, setProject] = useState<Project | null>(null);
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("outcome") ?? "";
+    const next = OUTCOME_FILTERS.includes(fromUrl as (typeof OUTCOME_FILTERS)[number]) ? fromUrl : "";
+    setFilterOutcome((current) => (current === next ? current : next));
+    setPage(1);
+  }, [searchParams]);
+
+  const updateOutcomeFilter = useCallback(
+    (value: string) => {
+      setFilterOutcome(value);
+      setPage(1);
+      const next = new URLSearchParams(searchParams);
+      if (value) {
+        next.set("outcome", value);
+      } else {
+        next.delete("outcome");
+      }
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  useEffect(() => {
+    if (!projectId) return;
+    api.projects
+      .list()
+      .then((list) => setProject(list.find((p) => p.id === projectId) ?? null))
+      .catch(() => setProject(null));
+  }, [projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -84,6 +126,8 @@ export default function ValidationHistoryPage() {
   const hasActiveFilters =
     Boolean(filterSchemaKey || filterVersionLabel || filterOutcome || documentSearch);
 
+  const showLifecycleColumn = showHidden || items.some((row) => row.archived_at || row.deleted_at);
+
   const onFilterSchemaChange = (value: string) => {
     setFilterSchemaKey(value);
     setFilterVersionLabel("");
@@ -96,14 +140,13 @@ export default function ValidationHistoryPage() {
   };
 
   const onFilterOutcomeChange = (value: string) => {
-    setFilterOutcome(value);
-    setPage(1);
+    updateOutcomeFilter(value);
   };
 
   const clearFilters = () => {
     setFilterSchemaKey("");
     setFilterVersionLabel("");
-    setFilterOutcome("");
+    updateOutcomeFilter("");
     setDocumentSearchInput("");
     setDocumentSearch("");
     setPage(1);
@@ -139,13 +182,12 @@ export default function ValidationHistoryPage() {
       <header className="hero-block">
         <h1 className="hero-title">Validation history</h1>
         <p className="hero-sub muted">
-          Each row is one persisted run. Filter by schema, version, or document name. Re-run stores a{" "}
-          <strong>new</strong> result when you change schema or version.
+          Every checked document is stored here with its outcome and checklist version — your audit trail.
         </p>
         <p className="muted small">
-          <Link to={`/projects/${projectId}/validation/run`}>Run new validation</Link>
+          <Link to={`/projects/${projectId}/validation/run`}>Validate new documents</Link>
           {" · "}
-          <Link to={`/projects/${projectId}/schemas`}>Schemas</Link>
+          <Link to={`/projects/${projectId}/schemas`}>Checklists</Link>
         </p>
       </header>
 
@@ -171,16 +213,16 @@ export default function ValidationHistoryPage() {
               />
             </label>
             <label className="field-label validation-filter-field">
-              <span className="muted small">Schema</span>
+              <span className="muted small">Checklist</span>
               <select
                 value={filterSchemaKey}
                 onChange={(e) => onFilterSchemaChange(e.target.value)}
-                aria-label="Filter by schema key"
+                aria-label="Filter by checklist"
               >
-                <option value="">All schemas</option>
+                <option value="">All checklists</option>
                 {schemaGroups.map((g) => (
                   <option key={g.schema_key} value={g.schema_key}>
-                    {g.schema_key}
+                    {formatSchemaKey(g.schema_key)}
                   </option>
                 ))}
               </select>
@@ -191,9 +233,9 @@ export default function ValidationHistoryPage() {
                 value={filterVersionLabel}
                 onChange={(e) => onFilterVersionChange(e.target.value)}
                 disabled={!filterSchemaKey}
-                aria-label="Filter by schema version"
+                aria-label="Filter by checklist version"
               >
-                <option value="">{filterSchemaKey ? "All versions" : "Select schema first"}</option>
+                <option value="">{filterSchemaKey ? "All versions" : "Select checklist first"}</option>
                 {versionOptions.map((v) => (
                   <option key={v.id} value={v.version_label}>
                     {v.version_label} ({v.status})
@@ -261,11 +303,11 @@ export default function ValidationHistoryPage() {
                   <thead>
                     <tr>
                       <th>Document</th>
-                      <th>Schema</th>
+                      <th>Checklist</th>
                       <th>Version</th>
                       <th>Outcome</th>
                       <th>Started</th>
-                      <th>Status</th>
+                      {showLifecycleColumn ? <th>Status</th> : null}
                       <th />
                     </tr>
                   </thead>
@@ -277,78 +319,50 @@ export default function ValidationHistoryPage() {
                         <tr key={row.id}>
                           <td>{row.document_filename}</td>
                           <td>
-                            <code>{row.schema_key}</code>
+                            <span className="checklist-label" title={row.schema_key}>
+                              {formatSchemaKey(row.schema_key)}
+                            </span>
                           </td>
                           <td>{row.version_label}</td>
                           <td>
                             <span className={`pill pill-${row.outcome.toLowerCase()}`}>{row.outcome}</span>
                           </td>
-                          <td className="muted small">{row.created_at?.replace("T", " ").replace("Z", "") ?? "—"}</td>
-                          <td className="validation-run-status-cell muted small">
-                            {row.deleted_at ? (
-                              <span className="pill pill-muted" title={row.deleted_at}>
-                                Removed
-                              </span>
-                            ) : null}
-                            {row.archived_at ? (
-                              <span className="pill pill-muted" title={row.archived_at}>
-                                Archived
-                              </span>
-                            ) : null}
-                            {!hidden ? "—" : null}
+                          <td className="muted small validation-run-started-cell">
+                            {formatRunTimestamp(row.created_at)}
                           </td>
+                          {showLifecycleColumn ? (
+                            <td className="validation-run-status-cell muted small">
+                              {row.deleted_at ? (
+                                <span className="pill pill-muted" title={row.deleted_at}>
+                                  Removed
+                                </span>
+                              ) : null}
+                              {row.archived_at ? (
+                                <span className="pill pill-muted" title={row.archived_at}>
+                                  Archived
+                                </span>
+                              ) : null}
+                              {!hidden ? "—" : null}
+                            </td>
+                          ) : null}
                           <td className="validation-run-actions-cell">
-                            <Link className="table-action-link" to={`/projects/${projectId}/validation/runs/${row.id}`}>
-                              View
-                            </Link>
-                            <button
-                              type="button"
-                              className="btn-inline link-button validation-run-row-action"
-                              disabled={isBusy || busyId !== null || schemaGroups.length === 0}
-                              title={
-                                schemaGroups.length === 0
-                                  ? "Create a schema before re-running"
-                                  : "Validate stored PDF with another schema/version"
-                              }
-                              onClick={() => {
+                            <ValidationRunRowActions
+                              projectId={projectId}
+                              row={row}
+                              hidden={hidden}
+                              isBusy={isBusy}
+                              canReRun={schemaGroups.length > 0}
+                              onReRun={() => {
                                 if (schemaGroups.length === 0) {
-                                  setError("No schemas available — create one under Schemas first.");
+                                  setError("No checklists available — create one under Checklists first.");
                                   return;
                                 }
                                 setReRunTarget(row);
                               }}
-                            >
-                              Re-run
-                            </button>
-                            {hidden ? (
-                              <button
-                                type="button"
-                                className="btn-inline link-button validation-run-row-action"
-                                disabled={isBusy}
-                                onClick={() => onRestore(row.id)}
-                              >
-                                Restore
-                              </button>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  className="btn-inline link-button validation-run-row-action"
-                                  disabled={isBusy}
-                                  onClick={() => onArchive(row.id)}
-                                >
-                                  Archive
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn-inline link-button validation-run-row-action"
-                                  disabled={isBusy}
-                                  onClick={() => onRemove(row.id)}
-                                >
-                                  Remove
-                                </button>
-                              </>
-                            )}
+                              onArchive={() => onArchive(row.id)}
+                              onRemove={() => onRemove(row.id)}
+                              onRestore={() => onRestore(row.id)}
+                            />
                           </td>
                         </tr>
                       );
@@ -376,6 +390,15 @@ export default function ValidationHistoryPage() {
           )}
         </>
       )}
+
+      <section className="history-reports-stack" aria-labelledby="history-reports-heading">
+        <h2 id="history-reports-heading" className="section-label history-reports-heading">
+          Reports &amp; exports
+        </h2>
+        <ValidationOutcomeGuide />
+        <ValidationDatasetExport projectId={projectId} projectName={project?.name} />
+        <ValidationAuditReport projectId={projectId} projectName={project?.name} />
+      </section>
 
       {reRunTarget && schemaGroups.length > 0 ? (
         <ValidationReRunDialog

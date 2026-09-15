@@ -3,8 +3,9 @@
 
 Called from ``start.sh`` after the gateway health check. Idempotent:
 
-1. If there are **no projects**, create **Default workspace** (which seeds ``wine_quality`` @ ``1.0`` via the API).
-2. For **each** existing project, if ``wine_quality`` / ``1.0`` is missing, POST the default schema version.
+1. Wait until ``GET /api/projects`` succeeds (Traefik + migrations + optional edge auth).
+2. Create **Default workspace** when no project has that exact name (seeds ``wine_quality`` @ ``1.0`` via the API).
+3. For **each** project, if ``wine_quality`` / ``1.0`` is missing, POST the default schema version.
 
 Uses only the public HTTP API (same as the browser) so it works with Traefik + optional edge auth.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -66,6 +68,15 @@ def _decode_list(raw: bytes) -> list:
     return json.loads(raw.decode("utf-8"))
 
 
+def find_project_by_name(projects: list, name: str) -> dict | None:
+    """Return the first project dict whose ``name`` matches exactly."""
+
+    for p in projects:
+        if p.get("name") == name:
+            return p
+    return None
+
+
 def project_has_wine_default(groups: list) -> bool:
     for g in groups:
         if g.get("schema_key") != SCHEMA_KEY:
@@ -76,30 +87,68 @@ def project_has_wine_default(groups: list) -> bool:
     return False
 
 
-def main() -> int:
+def wait_until_projects_api_ready(
+    *,
+    max_seconds: int | None = None,
+    interval_seconds: float | None = None,
+) -> tuple[int, bytes] | None:
+    """Poll ``GET /api/projects`` until HTTP 200 or timeout. Returns last response on success."""
+
+    max_s = max_seconds if max_seconds is not None else int(os.environ.get("SEED_MAX_WAIT_SECONDS", "90"))
+    interval = interval_seconds if interval_seconds is not None else float(
+        os.environ.get("SEED_WAIT_INTERVAL_SECONDS", "3")
+    )
+    deadline = time.monotonic() + max_s
+    last_code = 0
+    last_raw = b""
+    while time.monotonic() < deadline:
+        last_code, last_raw = _request("GET", "/api/projects")
+        if last_code == 200:
+            return last_code, last_raw
+        time.sleep(interval)
+    print(
+        f"GET /api/projects did not return 200 within {max_s}s (last HTTP {last_code} "
+        f"{last_raw.decode('utf-8', errors='replace')[:300]})",
+        file=sys.stderr,
+    )
+    return None
+
+
+def ensure_default_workspace_project(*, headers_note: str) -> tuple[list, int]:
+    """Create **Default workspace** when missing; return updated project list and exit code."""
+
     code, raw = _request("GET", "/api/projects")
     if code != 200:
         print(f"GET /api/projects failed: HTTP {code} {raw.decode('utf-8', errors='replace')[:500]}", file=sys.stderr)
-        return 1
+        return [], 1
 
     projects = _decode_list(raw)
-    headers_note = " (with edge auth)" if _auth_headers() else ""
+    if find_project_by_name(projects, DEFAULT_PROJECT_NAME) is not None:
+        return projects, 0
 
-    if not projects:
-        print(f"No projects — creating {DEFAULT_PROJECT_NAME!r}{headers_note}...")
-        code2, raw2 = _request(
-            "POST",
-            "/api/projects",
-            body={"name": DEFAULT_PROJECT_NAME},
+    print(f"Creating {DEFAULT_PROJECT_NAME!r}{headers_note}...")
+    code2, raw2 = _request(
+        "POST",
+        "/api/projects",
+        body={"name": DEFAULT_PROJECT_NAME},
+    )
+    if code2 not in {200, 201}:
+        print(
+            f"POST /api/projects failed: HTTP {code2} {raw2.decode('utf-8', errors='replace')[:500]}",
+            file=sys.stderr,
         )
-        if code2 not in {200, 201}:
-            print(
-                f"POST /api/projects failed: HTTP {code2} {raw2.decode('utf-8', errors='replace')[:500]}",
-                file=sys.stderr,
-            )
-            return 1
-        print("Default project created; wine_quality @ 1.0 was seeded automatically.")
-        return 0
+        return projects, 1
+
+    print("Default workspace created; wine_quality @ 1.0 was seeded automatically.")
+    code3, raw3 = _request("GET", "/api/projects")
+    if code3 != 200:
+        print(f"GET /api/projects failed after create: HTTP {code3}", file=sys.stderr)
+        return projects, 1
+    return _decode_list(raw3), 0
+
+
+def ensure_wine_schema_on_all_projects(projects: list, *, headers_note: str) -> int:
+    """POST default wine schema on projects that lack ``wine_quality`` @ ``1.0``."""
 
     missing = 0
     for p in projects:
@@ -128,11 +177,37 @@ def main() -> int:
             )
             return 1
 
+    if not projects:
+        print("No projects to update.", file=sys.stderr)
+        return 1
     if missing == 0:
         print(f"All {len(projects)} project(s) already have {SCHEMA_KEY} @ {VERSION_LABEL}.")
     else:
         print(f"Updated {missing} project(s) with {SCHEMA_KEY} @ {VERSION_LABEL}.")
     return 0
+
+
+def has_default_workspace_project() -> bool:
+    """Return True when **Default workspace** is listed (used by ``start.sh`` verification)."""
+
+    code, raw = _request("GET", "/api/projects")
+    if code != 200:
+        return False
+    return find_project_by_name(_decode_list(raw), DEFAULT_PROJECT_NAME) is not None
+
+
+def main() -> int:
+    ready = wait_until_projects_api_ready()
+    if ready is None:
+        return 1
+
+    headers_note = " (with edge auth)" if _auth_headers() else ""
+
+    projects, rc = ensure_default_workspace_project(headers_note=headers_note)
+    if rc != 0:
+        return rc
+
+    return ensure_wine_schema_on_all_projects(projects, headers_note=headers_note)
 
 
 if __name__ == "__main__":

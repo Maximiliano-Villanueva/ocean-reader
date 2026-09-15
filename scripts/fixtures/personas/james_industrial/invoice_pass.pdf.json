@@ -1,0 +1,7 @@
+{
+  "persona": "james",
+  "file": "invoice_pass.pdf",
+  "schema_key": "invoice",
+  "expected_outcome": "PASS",
+  "audit_note": "Supplier invoice within policy"
+}

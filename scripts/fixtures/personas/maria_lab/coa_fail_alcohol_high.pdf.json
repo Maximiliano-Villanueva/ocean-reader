@@ -1,0 +1,8 @@
+{
+  "persona": "maria",
+  "schema_key": "supplier_coa",
+  "schema_version": "1.0",
+  "source": "fail_schema/syn_fs_alcohol_high.pdf",
+  "expected_outcome": "FAIL",
+  "audit_note": "Alcohol above spec \u2014 hold batch"
+}

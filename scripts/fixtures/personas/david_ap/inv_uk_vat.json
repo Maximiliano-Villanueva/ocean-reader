@@ -1,0 +1,11 @@
+{
+  "invoice_number": "GB-VAT-9912",
+  "issue_date": "15 July 2025",
+  "due_date": "14 August 2025",
+  "vendor_name": "Thames Components Ltd",
+  "bill_to_name": "Nordic Supplies GmbH",
+  "subtotal_before_tax": 800.0,
+  "tax_amount": 160.0,
+  "total_due": 960.0,
+  "line_items_summary": "Consulting hours \u2014 warehouse layout review (40h)"
+}

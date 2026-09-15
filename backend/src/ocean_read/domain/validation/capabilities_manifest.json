@@ -1,0 +1,48 @@
+{
+  "dsl_versions": ["1", "2", "3"],
+  "strict_field_types": ["number", "string", "date"],
+  "global_rules": ["required", "range_validation", "type_check"],
+  "m3_features": {
+    "cross_field_rules": {
+      "requires_version": "2",
+      "expression_language": "sandboxed_ast",
+      "operators": ["AND", "OR", "NOT", ">", ">=", "<", "<=", "==", "!="]
+    },
+    "groups": {
+      "requires_version": "2",
+      "structure_hints": ["table", "list", "sections"]
+    }
+  },
+  "open_ended": {
+    "requires_version": "3",
+    "fields_key": "open_ended",
+    "properties": {
+      "extract_prompt": "required",
+      "evaluate_prompt": "required unless informative_only",
+      "informative_only": "optional boolean; extraction only, no PASS/FAIL impact",
+      "link_evidence": "optional boolean; when true, attach bbox evidence from pdf_blocks",
+      "evaluation_tags": ["pass", "fail", "ambiguous"],
+      "depends_on_fields": "optional list of strict field names for consolidated LLM evaluation"
+    }
+  },
+  "extraction_priority": ["regex", "layout", "llm_gap_fill"],
+  "extraction": {
+    "understand_document": "default true — infer regions/roles from layout-aware blocks before LLM extract",
+    "context_pass": "never | when_needed (default) | always"
+  },
+  "field_properties": {
+    "semantic_role": "e.g. recipient, issuer, document_total, line_item — disambiguates duplicate labels",
+    "extraction_hint": "optional natural-language hint for contextual extraction",
+    "on_ambiguity": [
+      "best_match",
+      "first",
+      "last",
+      "first-value",
+      "last-value",
+      "highest_confidence",
+      "any"
+    ],
+    "llm_fallback": "optional boolean; when true (or type date), Ollama fills the field if regex/layout miss"
+  },
+  "llm_validation_policy": "Strict rules are never evaluated by LLM. Open-ended evaluation uses allowed tags only."
+}

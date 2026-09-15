@@ -1,0 +1,57 @@
+/**
+ * Ocean Read — design tokens (ocean teal / slate; no purple).
+ * Import before App.css and component styles.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --or-bg: #070b10;
+  --or-bg-elevated: #0c1219;
+  --or-surface: #121a24;
+  --or-surface-raised: #182230;
+  --or-surface-hover: #1e2a3a;
+  --or-border: #243244;
+  --or-border-subtle: #1a2533;
+
+  /* Text */
+  --or-text: #eef3f8;
+  --or-text-secondary: #b4c2d0;
+  --or-text-muted: #7d92a8;
+  --or-text-inverse: #070b10;
+
+  /* Brand accent — ocean teal */
+  --or-accent: #2ec4b6;
+  --or-accent-hover: #5eddd2;
+  --or-accent-strong: #1f9d92;
+  --or-accent-soft: rgba(46, 196, 182, 0.12);
+  --or-accent-border: rgba(46, 196, 182, 0.35);
+  --or-accent-glow: rgba(46, 196, 182, 0.2);
+
+  /* Semantic */
+  --or-success: #3ecf8e;
+  --or-success-soft: rgba(62, 207, 142, 0.12);
+  --or-error: #f07178;
+  --or-error-soft: rgba(240, 113, 120, 0.12);
+  --or-warning: #e8b86a;
+  --or-warning-soft: rgba(232, 184, 106, 0.12);
+  --or-info: #6cb6ff;
+
+  /* Field / code */
+  --or-mono: #7ee8dc;
+  --or-code-bg: #0a1018;
+
+  /* Layout */
+  --or-radius-sm: 8px;
+  --or-radius: 12px;
+  --or-radius-lg: 16px;
+  --or-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --or-shadow-sm: 0 2px 12px rgba(0, 0, 0, 0.25);
+  --or-max-width: 1240px;
+  --or-font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --or-mono-font: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Motion */
+  --or-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --or-duration: 160ms;
+}

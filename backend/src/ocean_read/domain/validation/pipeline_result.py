@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ocean_read.domain.validation.outcomes import FieldRuleOutcome, FieldValidationError
 from ocean_read.domain.validation.mapping import AmbiguousFieldInfo
+from ocean_read.domain.validation.open_ended_runner import OpenEndedFieldResult
+from ocean_read.domain.validation.outcomes import FieldRuleOutcome, FieldValidationError
 
 
 @dataclass(frozen=True)
@@ -28,3 +29,4 @@ class PipelineValidationResult:
     field_rule_outcomes: tuple[FieldRuleOutcome, ...] = ()
     pdf_hash: str = ""
     pipeline_snapshots: dict[str, Any] | None = None
+    open_ended_results: tuple[OpenEndedFieldResult, ...] = ()

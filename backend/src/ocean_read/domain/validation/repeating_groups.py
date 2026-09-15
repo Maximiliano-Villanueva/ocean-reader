@@ -140,6 +140,30 @@ def _section_text_blob(blocks: list[TextBlock], hint: str) -> str:
     return "\n".join(b.text for b in blocks if _block_matches_section(hint, b))
 
 
+def _lines_from_glued_section_blob(blob: str, hint: str, field_count: int) -> list[str]:
+    """
+    Recover list-style rows when Docling emits one glued line after ``section_hint``.
+
+    Example tail: ``GoodRow 10 0 100 BadRow 200 0 100`` with four fields per row.
+    """
+
+    if field_count < 2:
+        return []
+    h = hint.strip().lower()
+    lower = blob.lower()
+    idx = lower.find(h)
+    if idx < 0:
+        return []
+    tail = blob[idx + len(h) :].strip()
+    if not tail:
+        return []
+    if "\n" in tail:
+        return [ln.strip() for ln in tail.splitlines() if ln.strip()]
+    num_part = r"\s+".join([r"[\d.]+"] * (field_count - 1))
+    pattern = re.compile(rf"\S+\s+{num_part}")
+    return [m.group(0).strip() for m in pattern.finditer(tail)]
+
+
 def _build_row_from_tokens(
     tokens: list[str],
     field_order: list[str],
@@ -297,7 +321,14 @@ def extract_group_rows(blocks: list[TextBlock], _group_name: str, group_spec: di
             return bbox_rows
     blob = _section_text_blob(blocks, hint)
     rows_out: list[dict[str, Any]] = []
-    for raw_line in blob.splitlines():
+    lines = [raw_line.strip() for raw_line in blob.splitlines() if raw_line.strip()]
+    if structure == "list" and not any(
+        _split_row_tokens(line, field_order, structure) for line in lines
+    ):
+        glued = _lines_from_glued_section_blob(blob, hint, len(field_order))
+        if glued:
+            lines = glued
+    for raw_line in lines:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue

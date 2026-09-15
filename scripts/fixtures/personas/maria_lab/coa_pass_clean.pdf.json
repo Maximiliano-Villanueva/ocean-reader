@@ -1,0 +1,8 @@
+{
+  "persona": "maria",
+  "schema_key": "supplier_coa",
+  "schema_version": "1.0",
+  "source": "clean/row_000_clean.pdf",
+  "expected_outcome": "PASS",
+  "audit_note": "Routine supplier CoA \u2014 approve"
+}

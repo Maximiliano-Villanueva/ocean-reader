@@ -1,0 +1,52 @@
+{
+  "version": "3",
+  "fields": {
+    "invoice_number": {
+      "type": "string",
+      "required": true,
+      "aliases": [
+        "Invoice N\u00ba",
+        "invoice number"
+      ],
+      "semantic_role": "document_identifier",
+      "llm_fallback": true
+    },
+    "issue_date": {
+      "type": "date",
+      "required": false,
+      "aliases": [
+        "Fecha",
+        "issue date"
+      ],
+      "semantic_role": "issue_date",
+      "llm_fallback": true
+    },
+    "total_due": {
+      "type": "number",
+      "required": true,
+      "aliases": [
+        "TOTAL INVOICE",
+        "total due"
+      ],
+      "semantic_role": "document_total",
+      "min": 0,
+      "llm_fallback": true
+    }
+  },
+  "rules": [
+    "required",
+    "range_validation",
+    "type_check"
+  ],
+  "extraction": {
+    "understand_document": true,
+    "context_pass": "when_needed"
+  },
+  "open_ended": {
+    "recipient_name": {
+      "extract_prompt": "Extract the bill-to recipient name",
+      "informative_only": true,
+      "link_evidence": true
+    }
+  }
+}

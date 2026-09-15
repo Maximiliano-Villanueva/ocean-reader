@@ -1,26 +1,28 @@
-/** Human-readable labels for validation rule codes returned by the API. */
+/**
+ * Human-readable labels for validation rules and run outcomes.
+ */
 
+const RULE_LABELS: Record<string, string> = {
+  required: "Value required",
+  range_validation: "Must be within allowed range",
+  type_check: "Must match expected type",
+  cross_field: "Cross-field rule",
+};
+
+/** Plain-language description of a validation rule id. */
 export function describeValidationRule(rule: string): string {
-  switch (rule) {
-    case "required":
-      return "Required field — the pipeline must resolve exactly one value for this field before rules apply.";
-    case "range_validation":
-      return "Allowed range — numeric values must lie within the inclusive minimum and maximum defined in the schema.";
-    case "type_check":
-      return "Type conformance — the resolved value must match the schema type (for example, numeric fields must parse as numbers).";
-    default:
-      return `Engine rule «${rule}» — see schema definition for details.`;
-  }
+  return RULE_LABELS[rule] ?? rule.replace(/_/g, " ");
 }
 
-export function outcomeSummary(status: "PASS" | "FAIL" | "AMBIGUOUS"): string {
+/** Short explanation shown under the outcome banner. */
+export function outcomeSummary(status: string): string {
   switch (status) {
     case "PASS":
-      return "All applicable checks completed successfully; no blocking rule violations were recorded.";
+      return "All required fields were found and passed the rules in the schema.";
     case "FAIL":
-      return "One or more schema rules failed; review each item below for expected constraints and evidence pulled from the PDF.";
+      return "At least one field failed a rule or was missing.";
     case "AMBIGUOUS":
-      return "The extractor produced multiple conflicting candidates for at least one field; resolve document ambiguity or tighten extraction.";
+      return "Multiple conflicting readings were found for at least one field — review candidates on the PDF.";
     default:
       return "";
   }

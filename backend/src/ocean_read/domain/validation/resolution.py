@@ -10,9 +10,11 @@ if TYPE_CHECKING:
 
 # Higher wins; aligns with product priority: regex > layout > LLM fallback.
 SOURCE_PRIORITY: dict[str, int] = {
-    "regex": 3,
-    "layout": 2,
-    "llm": 1,
+    "llm_context": 5,
+    "regex": 4,
+    "layout": 3,
+    "llm": 2,
+    "vision": 1,
 }
 
 

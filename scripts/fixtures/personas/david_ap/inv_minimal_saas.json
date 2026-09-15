@@ -1,0 +1,11 @@
+{
+  "invoice_number": "SAAS-00441",
+  "issue_date": "2025-07-01",
+  "due_date": "2025-07-31",
+  "vendor_name": "CloudLedger Inc.",
+  "bill_to_name": "Nordic Supplies GmbH AP",
+  "subtotal_before_tax": 299.0,
+  "tax_amount": 59.8,
+  "total_due": 358.8,
+  "line_items_summary": "Pro plan \u2014 25 seats \u00d7 1 month"
+}

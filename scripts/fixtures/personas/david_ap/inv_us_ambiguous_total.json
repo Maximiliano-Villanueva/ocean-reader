@@ -1,0 +1,11 @@
+{
+  "invoice_number": "US-2025-8844-AMB",
+  "issue_date": "2025-07-17",
+  "due_date": "2025-08-16",
+  "vendor_name": "Acme Industrial Supply LLC",
+  "bill_to_name": "Nordic Supplies GmbH",
+  "subtotal_before_tax": 750.0,
+  "tax_amount": 67.5,
+  "total_due": 817.5,
+  "line_items_summary": "Mixed fasteners \u2014 bulk order"
+}

@@ -1,0 +1,11 @@
+{
+  "invoice_number": "ES-2025-771",
+  "issue_date": "1 de julio de 2025",
+  "due_date": "31 de julio de 2025",
+  "vendor_name": "Proveedores Mediterr\u00e1neo S.L.",
+  "bill_to_name": "Nordic Supplies GmbH",
+  "subtotal_before_tax": 4200.0,
+  "tax_amount": 882.0,
+  "total_due": 5082.0,
+  "line_items_summary": "Materiales de embalaje \u2014 palets y film"
+}

@@ -29,6 +29,7 @@ Postgres still stores historical rows from older features (e.g. legacy `document
 | **pgadmin** | pgAdmin 4 web UI for Postgres (**`127.0.0.1:${PGADMIN_PUBLISH:-5050}`**); register server host **`db`**, port **5432** |
 | **backend** | FastAPI (not published on the host; only via Traefik) |
 | **frontend** | nginx + static SPA (not published on the host; only via Traefik) |
+| **schema-agent** | Conversational schema authoring (ADK → **Ollama** `gemma4:e4b` on the host) |
 
 ### Hostnames Traefik accepts (file `infra/traefik/dynamic/ocean.yml`)
 
@@ -45,7 +46,15 @@ Postgres still stores historical rows from older features (e.g. legacy `document
 
 ## Host requirements
 
-1. **Ollama** at **`OLLAMA_BASE_URL`** (default **`http://host.docker.internal:11434`** from the backend container) when **`VALIDATION_LLM_FALLBACK_ENABLED`** is true.
+1. **Ollama** on the host at **`OLLAMA_BASE_URL`** (default **`http://host.docker.internal:11434`** from containers). Pull **`gemma4:e4b`** before using the schema assistant or LLM validation features:
+
+```bash
+ollama pull gemma4:e4b
+```
+
+Used when **`VALIDATION_LLM_FALLBACK_ENABLED`**, **`VALIDATION_OPEN_ENDED_ENABLED`**, **`VALIDATION_LLM_VISION_ENABLED`**, or the schema agent is active.
+
+2. **schema-agent** starts with **`./start.sh`**. Optional check: `./scripts/verify_docker_llm.sh`. See [`SCHEMA_AGENT.md`](SCHEMA_AGENT.md).
 
 Optional:
 
@@ -53,7 +62,7 @@ Optional:
 
 ## Bring up
 
-**One command** from repo root: **`./start.sh`** rebuilds changed images (`--build`), waits until **`GET /api/health`** succeeds through Traefik (up to **`START_MAX_WAIT_SECONDS`**, default 240), then runs **`scripts/ensure_default_validation.py`** so a **Default workspace** project and **`wine_quality` @ `1.0`** exist when the DB was empty or old projects lack that schema (idempotent; uses the public API on **`GATEWAY_HTTP_PORT`**). It prints what to open. With **`EDGE_AUTH_ENABLED=true`**, it uses **`EDGE_API_TOKEN`** from `.env` for the health check and the seed script—set the token or those steps never pass.
+**One command** from repo root: **`./start.sh`** — rebuilds images, waits for **`/api/health`** and **`/api/projects`**, seeds **Default workspace** + **`wine_quality` @ `1.0`** (retries + verification; exits **1** if seeding fails). No separate seed step. With **`EDGE_AUTH_ENABLED=true`**, set **`EDGE_API_TOKEN`** in `.env` before **`./start.sh`** so health, seed, and the frontend build arg stay aligned.
 
 ```bash
 ./start.sh

@@ -1,0 +1,34 @@
+{
+  "invoices": [
+    {
+      "id": "inv_us_acme",
+      "pdf": "inv_us_acme.pdf",
+      "truth": "inv_us_acme.json"
+    },
+    {
+      "id": "inv_uk_vat",
+      "pdf": "inv_uk_vat.pdf",
+      "truth": "inv_uk_vat.json"
+    },
+    {
+      "id": "inv_minimal_saas",
+      "pdf": "inv_minimal_saas.pdf",
+      "truth": "inv_minimal_saas.json"
+    },
+    {
+      "id": "inv_es_formatted",
+      "pdf": "inv_es_formatted.pdf",
+      "truth": "inv_es_formatted.json"
+    },
+    {
+      "id": "inv_us_fail_tax",
+      "pdf": "inv_us_fail_tax.pdf",
+      "truth": "inv_us_fail_tax.json"
+    },
+    {
+      "id": "inv_us_ambiguous_total",
+      "pdf": "inv_us_ambiguous_total.pdf",
+      "truth": "inv_us_ambiguous_total.json"
+    }
+  ]
+}

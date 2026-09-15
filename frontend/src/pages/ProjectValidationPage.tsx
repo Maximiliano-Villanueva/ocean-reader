@@ -6,13 +6,8 @@ import {
   type ValidateDocumentResponse,
   type ValidationSchemaGroupOut,
 } from "../api";
-import PdfEvidenceViewer from "../components/pdf/PdfEvidenceViewer";
-import {
-  highlightsFromPipelineSnapshot,
-  highlightsFromReport,
-  mergeHighlights,
-  type PdfHighlight,
-} from "../lib/evidenceHighlights";
+import ValidationAttributePicker, { type RunAttribute } from "../components/validation/ValidationAttributePicker";
+import { formatSchemaKey } from "../lib/displayLabels";
 
 function isPdfFile(f: File): boolean {
   const lower = f.name.toLowerCase();
@@ -40,15 +35,13 @@ export default function ProjectValidationPage() {
   const [schemaKey, setSchemaKey] = useState("");
   const [version, setVersion] = useState("");
   const [queue, setQueue] = useState<QueueEntry[]>([]);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [schemaLoadError, setSchemaLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attributes, setAttributes] = useState<RunAttribute[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [candidateHighlights, setCandidateHighlights] = useState<PdfHighlight[]>([]);
-  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
 
   useEffect(() => {
     setSchemaKey("");
@@ -56,7 +49,7 @@ export default function ProjectValidationPage() {
     setGroups([]);
     setSchemaLoadError(null);
     setQueue([]);
-    setActiveKey(null);
+    setAttributes([]);
   }, [projectId]);
 
   useEffect(() => {
@@ -90,7 +83,13 @@ export default function ProjectValidationPage() {
     if (pick) setVersion(pick.version_label);
   }, [groups, schemaKey]);
 
-  const activeEntry = useMemo(() => queue.find((q) => q.key === activeKey) ?? null, [queue, activeKey]);
+  const anyRunning = queue.some((q) => q.phase === "running");
+  const completedCount = queue.filter((q) => q.phase === "done").length;
+  const passCount = queue.filter((q) => q.result?.status === "PASS").length;
+  const failCount = queue.filter((q) => q.result?.status === "FAIL").length;
+  const ambCount = queue.filter((q) => q.result?.status === "AMBIGUOUS").length;
+  const errorCount = queue.filter((q) => q.phase === "done" && q.error).length;
+  const batchDone = queue.length > 0 && completedCount === queue.length && !anyRunning;
 
   const versionsForKey = useMemo(
     () => groups.find((g) => g.schema_key === schemaKey)?.versions ?? [],
@@ -116,12 +115,10 @@ export default function ProjectValidationPage() {
 
   const removeFromQueue = useCallback((key: string) => {
     setQueue((prev) => prev.filter((q) => q.key !== key));
-    setActiveKey((cur) => (cur === key ? null : cur));
   }, []);
 
   const clearQueue = useCallback(() => {
     setQueue([]);
-    setActiveKey(null);
     setError(null);
   }, []);
 
@@ -178,16 +175,15 @@ export default function ProjectValidationPage() {
     [addPdfFiles, preventDefaults],
   );
 
-  useEffect(() => {
-    if (queue.length === 0) {
-      setActiveKey(null);
-      return;
+  const attributeMap = useMemo(() => {
+    const out: Record<string, string | null> = {};
+    for (const a of attributes) {
+      const k = a.key.trim();
+      if (!k) continue;
+      out[k] = a.value?.trim() ? a.value.trim() : null;
     }
-    setActiveKey((cur) => {
-      if (cur && queue.some((q) => q.key === cur)) return cur;
-      return queue[0]!.key;
-    });
-  }, [queue]);
+    return out;
+  }, [attributes]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -204,7 +200,13 @@ export default function ProjectValidationPage() {
           prev.map((q) => (q.key === key ? { ...q, phase: "running", result: undefined, error: undefined } : q)),
         );
         try {
-          const r = await api.validation.validateDocument(projectId, schemaKey, version, entry.file);
+          const r = await api.validation.validateDocument(
+            projectId,
+            schemaKey,
+            version,
+            entry.file,
+            attributeMap,
+          );
           setQueue((prev) => prev.map((q) => (q.key === key ? { ...q, phase: "done", result: r } : q)));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -216,44 +218,17 @@ export default function ProjectValidationPage() {
     }
   }
 
-  const result = activeEntry?.result;
-
-  useEffect(() => {
-    const runId = result?.run_id;
-    if (!projectId || !runId) {
-      setCandidateHighlights([]);
-      return;
-    }
-    let cancelled = false;
-    void Promise.all([
-      api.validation.fetchRunCandidates(projectId, runId),
-      api.validation.fetchRunBlocks(projectId, runId),
-    ]).then(([cands, blocks]) => {
-      if (!cancelled && result) {
-        setCandidateHighlights(highlightsFromPipelineSnapshot(result, cands, blocks));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, result]);
-
-  const pdfHighlights = useMemo(() => {
-    if (!result) return [] as PdfHighlight[];
-    return mergeHighlights(highlightsFromReport(result), candidateHighlights);
-  }, [result, candidateHighlights]);
-
   return (
     <div className="page project-route-page validation-page">
-      <header className="hero-block">
-        <h1 className="hero-title">Run validation</h1>
+      <header className="hero-block validation-page-hero">
+        <h1 className="hero-title">Validate documents</h1>
         <p className="hero-sub muted">
-          Drag PDFs, choose an active schema version, then run the pipeline. Results are saved to{" "}
-          <Link to={`/projects/${projectId}/validation`}>validation history</Link>.
+          Upload PDFs, run them against your checklist, and open each result to see exactly what was extracted — with
+          highlights on the source document.
         </p>
-        <p className="muted small">
-          Manage rule definitions under <Link to={`/projects/${projectId}/schemas`}>Schemas</Link> or{" "}
-          <Link to={`/projects/${projectId}/schema-versions`}>All versions</Link>.
+        <p className="muted small validation-page-hero-links">
+          Manage rules under <Link to={`/projects/${projectId}/schemas`}>Checklists</Link>.
+          Past runs live in <Link to={`/projects/${projectId}/validation`}>History</Link>.
         </p>
       </header>
 
@@ -272,7 +247,7 @@ export default function ProjectValidationPage() {
       <form className="validation-form" onSubmit={onSubmit}>
         <div className="validation-form-grid">
           <label className="field-label">
-            <span>Schema</span>
+            <span>Checklist</span>
             <select
               value={schemaKey}
               onChange={(e) => {
@@ -283,7 +258,7 @@ export default function ProjectValidationPage() {
               <option value="">Select…</option>
               {groups.map((g) => (
                 <option key={g.schema_key} value={g.schema_key}>
-                  {g.schema_key}
+                  {formatSchemaKey(g.schema_key)}
                 </option>
               ))}
             </select>
@@ -300,6 +275,13 @@ export default function ProjectValidationPage() {
             </select>
           </label>
         </div>
+
+        <ValidationAttributePicker
+          projectId={projectId}
+          value={attributes}
+          onChange={setAttributes}
+          disabled={busy}
+        />
 
         <div
           className={`validation-dropzone${dragActive ? " validation-dropzone--active" : ""}`}
@@ -331,31 +313,58 @@ export default function ProjectValidationPage() {
           </button>
         </div>
 
+        {batchDone && queue.length > 1 ? (
+          <p className="validation-batch-summary" role="status">
+            <strong>Batch complete:</strong> {passCount} passed · {failCount} failed · {ambCount} need review
+            {errorCount > 0 ? ` · ${errorCount} errors` : ""}
+          </p>
+        ) : null}
+
         {queue.length > 0 && (
           <div className="validation-file-queue" aria-live="polite">
             <div className="validation-file-queue-header">
-              <span className="muted small">{queue.length} PDF{queue.length === 1 ? "" : "s"} queued</span>
+              <span className="muted small">
+                {anyRunning
+                  ? `Validating… (${completedCount}/${queue.length} done)`
+                  : `${queue.length} PDF${queue.length === 1 ? "" : "s"} in queue`}
+              </span>
               <button type="button" className="btn-inline validation-file-queue-clear" onClick={clearQueue}>
                 Clear all
               </button>
             </div>
-            <ul className="list validation-file-queue-list">
+            <ul className="list validation-file-queue-list validation-run-status-list">
               {queue.map((q) => (
-                <li key={q.key} className="validation-file-queue-item">
-                  <button
-                    type="button"
-                    className={`validation-file-queue-select${activeKey === q.key ? " validation-file-queue-select--active" : ""}`}
-                    onClick={() => setActiveKey(q.key)}
-                  >
+                <li key={q.key} className="validation-run-status-item">
+                  <div className="validation-run-status-row">
                     <span className="validation-file-queue-name">{q.file.name}</span>
-                    {q.phase === "running" && <span className="muted small">Running…</span>}
+                    {q.phase === "idle" && <span className="validation-run-phase muted small">Queued</span>}
+                    {q.phase === "running" && (
+                      <span className="validation-run-phase validation-run-phase--running">In progress…</span>
+                    )}
+                    {q.phase === "done" && q.error && (
+                      <span className="validation-file-queue-badge validation-file-queue-badge--error">Error</span>
+                    )}
                     {q.phase === "done" && q.result && (
-                      <span className={`validation-file-queue-badge validation-file-queue-badge--${q.result.status.toLowerCase()}`}>
+                      <span
+                        className={`validation-file-queue-badge validation-file-queue-badge--${q.result.status.toLowerCase()}`}
+                      >
                         {q.result.status}
                       </span>
                     )}
-                    {q.phase === "done" && q.error && <span className="validation-file-queue-badge validation-file-queue-badge--error">Error</span>}
-                  </button>
+                  </div>
+                  {q.phase === "done" && q.result?.run_id ? (
+                    <Link
+                      to={`/projects/${projectId}/validation/runs/${q.result.run_id}`}
+                      className="validation-run-detail-link"
+                    >
+                      View full report with PDF highlights →
+                    </Link>
+                  ) : null}
+                  {q.phase === "done" && q.error ? (
+                    <p className="alert-error small" role="alert">
+                      {q.error}
+                    </p>
+                  ) : null}
                   <button
                     type="button"
                     className="validation-file-queue-remove"
@@ -376,102 +385,6 @@ export default function ProjectValidationPage() {
       </form>
 
       {error && <p className="alert-error">{error}</p>}
-
-      {activeEntry && (activeEntry.result || activeEntry.error) && (
-        <div className="validation-result-layout">
-          <div className="validation-result-main">
-            {activeEntry.error ? (
-              <p className="alert-error" role="alert">
-                {activeEntry.file.name}: {activeEntry.error}
-              </p>
-            ) : activeEntry.result ? (
-              <>
-                <p className="muted small">
-                  <strong>{activeEntry.file.name}</strong>
-                </p>
-                <p
-                  className={`validation-status validation-status-${activeEntry.result.status.toLowerCase()}`}
-                  role="status"
-                  aria-live="polite"
-                >
-                  {activeEntry.result.status}
-                </p>
-                <p className="muted small">
-                  Schema <code>{activeEntry.result.schema_id}</code> @ {activeEntry.result.schema_version}
-                </p>
-                {activeEntry.result.status === "AMBIGUOUS" && (activeEntry.result.ambiguous_fields?.length ?? 0) > 0 && (
-                  <p className="validation-ambiguous-note">
-                    Ambiguous fields (multiple conflicting extractions):{" "}
-                    <strong>
-                      {(activeEntry.result.ambiguous_fields ?? []).map((a) => `${a.field} (${a.candidate_count})`).join(", ")}
-                    </strong>
-                  </p>
-                )}
-                {activeEntry.result.results.length > 0 ? (
-                  <ul className="list validation-error-list">
-                    {activeEntry.result.results.map((r) => (
-                      <li key={`${r.field}-${r.rule}`} className="validation-error-card">
-                        <div className="validation-error-title">
-                          <strong>{r.field}</strong>{" "}
-                          <span className="muted">
-                            ({r.rule}) value={String(r.value)} expected={JSON.stringify(r.expected)}
-                          </span>
-                        </div>
-                        {r.evidence && (
-                          <>
-                            <button
-                              type="button"
-                              className="evidence-jump-btn evidence-jump-btn--inline"
-                              onClick={() => {
-                                const hit = pdfHighlights.find(
-                                  (h) => h.field === r.field && h.rule === r.rule,
-                                );
-                                if (hit) setActiveHighlightId(hit.id);
-                              }}
-                            >
-                              Show on PDF
-                            </button>
-                            <dl className="evidence-dl">
-                              <dt>Evidence text</dt>
-                              <dd>
-                                <pre className="evidence-snippet">{r.evidence.text || "—"}</pre>
-                              </dd>
-                              <dt>Block / page</dt>
-                              <dd>
-                                <code>{r.evidence.block_id || "—"}</code> · page {r.evidence.page}
-                                {r.evidence.bbox && r.evidence.bbox.length >= 4 ? (
-                                  <>
-                                    {" "}
-                                    · bbox [{r.evidence.bbox.map((n) => n.toFixed(1)).join(", ")}]
-                                  </>
-                                ) : null}
-                              </dd>
-                            </dl>
-                          </>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                ) : activeEntry.result.status !== "AMBIGUOUS" ? (
-                  <p className="muted">No rule violations.</p>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-          <aside className="validation-pdf-pane" aria-label="PDF preview">
-            {activeEntry ? (
-              <PdfEvidenceViewer
-                file={activeEntry.file}
-                highlights={pdfHighlights}
-                activeHighlightId={activeHighlightId}
-                onHighlightClick={(h) => setActiveHighlightId(h.id)}
-              />
-            ) : (
-              <p className="muted">Select a queued file to preview.</p>
-            )}
-          </aside>
-        </div>
-      )}
     </div>
   );
 }

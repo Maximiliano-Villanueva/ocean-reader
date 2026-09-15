@@ -1,0 +1,63 @@
+{
+  "version": "3",
+  "fields": {
+    "invoice_number": {
+      "type": "string",
+      "required": true,
+      "aliases": [
+        "N\u00famero de factura",
+        "Numero de factura"
+      ],
+      "regex_hint": "(?i)(?:invoice\\s*number|n[u\u00fa]mero\\s*de\\s*factura)\\s*[:\\s]+([A-Z0-9-]+)"
+    },
+    "total_usd": {
+      "type": "number",
+      "required": true,
+      "min": 0,
+      "max": 100000,
+      "aliases": [
+        "Importe por pagar",
+        "Total due",
+        "Total"
+      ],
+      "regex_hint": "(?i)(?:total\\s*due|importe\\s*por\\s*pagar|total)\\s*[:\\s]*USD?([\\d.]+)"
+    }
+  },
+  "rules": [
+    "required",
+    "range_validation",
+    "type_check"
+  ],
+  "cross_field_rules": [
+    {
+      "id": "total_matches_line",
+      "expression": "total_usd == 20",
+      "error_message": "Total must match line item (USD20.00)",
+      "fields": [
+        "total_usd"
+      ]
+    }
+  ],
+  "open_ended": {
+    "executive_summary": {
+      "extract_prompt": "Two-sentence summary of what this invoice is for",
+      "informative_only": true,
+      "link_evidence": false
+    },
+    "payment_terms_ok": {
+      "extract_prompt": "Extract the payment due date or terms sentence",
+      "evaluate_prompt": "Given total_usd and invoice_number, does the payment terms sentence state due on 9 August 2025? Reply pass, fail, or ambiguous.",
+      "informative_only": false,
+      "link_evidence": true,
+      "depends_on_fields": [
+        "total_usd",
+        "invoice_number"
+      ],
+      "evaluation_tags": [
+        "pass",
+        "fail",
+        "ambiguous"
+      ]
+    }
+  }
+}

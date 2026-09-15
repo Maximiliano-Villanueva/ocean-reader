@@ -34,9 +34,9 @@ def _coerce_number(v: Any) -> float | None:
 
 
 def _milestone3_active(schema_body: dict[str, Any]) -> bool:
-    """M3 rules apply only when the schema declares ``version`` ``\"2\"`` (see milestone doc)."""
+    """M3 rules apply when the schema declares ``version`` ``\"2\"`` or ``\"3\"``."""
 
-    return str(schema_body.get("version") or "") == "2"
+    return str(schema_body.get("version") or "") in ("2", "3")
 
 
 def validate_schema(

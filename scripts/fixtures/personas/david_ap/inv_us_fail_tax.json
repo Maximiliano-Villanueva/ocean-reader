@@ -1,0 +1,11 @@
+{
+  "invoice_number": "US-2025-8843-FAIL",
+  "issue_date": "2025-07-16",
+  "due_date": "2025-08-15",
+  "vendor_name": "Acme Industrial Supply LLC",
+  "bill_to_name": "Nordic Supplies GmbH",
+  "subtotal_before_tax": 500.0,
+  "tax_amount": 50.0,
+  "total_due": 999.0,
+  "line_items_summary": "Emergency spare parts"
+}

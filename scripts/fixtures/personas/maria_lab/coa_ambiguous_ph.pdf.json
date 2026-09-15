@@ -1,0 +1,8 @@
+{
+  "persona": "maria",
+  "schema_key": "supplier_coa",
+  "schema_version": "1.0",
+  "source": "ambiguous/syn_amb_ph_dup.pdf",
+  "expected_outcome": "AMBIGUOUS",
+  "audit_note": "Conflicting pH \u2014 human review"
+}

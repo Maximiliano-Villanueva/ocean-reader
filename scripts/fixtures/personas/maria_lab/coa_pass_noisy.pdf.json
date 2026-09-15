@@ -1,0 +1,8 @@
+{
+  "persona": "maria",
+  "schema_key": "supplier_coa",
+  "schema_version": "1.0",
+  "source": "noisy/row_001_noisy.pdf",
+  "expected_outcome": "PASS",
+  "audit_note": "Scanned/noisy supplier PDF"
+}

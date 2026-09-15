@@ -1,76 +1,117 @@
 # Ocean Read
 
-## What this is
+**Schema-driven PDF validation** for QC, accounts payable, and audit teams. Upload a PDF, run it against a versioned checklist, and get **PASS / FAIL / AMBIGUOUS** with **pinpoint evidence** on every field.
 
-**Ocean Read** is a **schema-driven deterministic PDF validation** service: projects hold **versioned validation schemas** (JSON rules); the API accepts a PDF and returns **PASS/FAIL** with **structured evidence** (matched text, block id, page, bbox). Optional **Ollama** LLM assists extraction internally (`VALIDATION_LLM_FALLBACK_ENABLED`); users never configure prompts or regex.
+## Features
 
-The canonical brief is **[`project_definition.md`](project_definition.md)**. Domain vocabulary: **[`CONTEXT.md`](CONTEXT.md)**.
+- **Workspaces** — isolate projects (labs, AP desks, pilots).
+- **Checklists** — versioned validation schemas (DSL v3), Schema Studio wizard, optional schema agent.
+- **Validate** — batch PDF upload with optional **tags** (key/value or key-only).
+- **History** — audit trail with filters, exports (CSV/JSON), PDF replay with highlights.
+- **Insights** — cohort views: aggregate pass rates by tags, checklist, version, and outcome thresholds.
+- **Manual corrections** — edit extracted values on a run; saves a new revision and revalidates.
 
-## Quick links (Docker)
+## Quick start
 
-Defaults assume Compose / `.env`. Replace **8080** with **`GATEWAY_HTTP_PORT`** if overridden.
+### 1. Prerequisites
 
-- **App:** [http://localhost:8080/](http://localhost:8080/)
-- **Logs:** [http://localhost:8080/logs](http://localhost:8080/logs)
-- **API docs:** `http://localhost:8080/docs` — primary validation endpoint **`POST /api/validate-document`**
-- **pgAdmin:** `http://127.0.0.1:5050/` (see **`.env.example`** for credentials); DB host **`db`**, port **5432**, database **`ocean_read`**
-- **Postgres from host:** `psql postgresql://ocean:ocean@127.0.0.1:15432/ocean_read` (or **`POSTGRES_PUBLISH`**)
-
-### Reset database / volumes
-
-| Goal | Command (repo root) |
-|------|------------------------|
-| Destroy Postgres + uploads volumes | `docker compose down -v` then `./start.sh` |
-| Empty app rows (CASCADE from projects) | `./scripts/empty_dev_database.sh` |
-| Same + wipe upload files | `./scripts/empty_dev_testing.sh` |
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| **[`docs/ONBOARDING.md`](docs/ONBOARDING.md)** | First read for engineers and AI agents |
-| [`docs/VALIDATION_ENGINE.md`](docs/VALIDATION_ENGINE.md) | Pipeline, schema persistence, API |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System view (edge, backend, DB) |
-| [`docs/BACKEND.md`](docs/BACKEND.md) | `ocean_read/` package layout |
-| [`docs/FRONTEND.md`](docs/FRONTEND.md) | React routes and `api.ts` |
-| [`docs/TESTING.md`](docs/TESTING.md) | `pytest` conventions |
-| [`docs/DOCKER.md`](docs/DOCKER.md) | Compose, Traefik, env vars |
-| [`docs/README.md`](docs/README.md) | Index of `docs/` |
-
-## Quick start (Docker)
-
-1. Install [Ollama](https://ollama.com) on the host and run `ollama pull gemma4:e4b` (LLM used when validation LLM fallback is enabled).
-
-2. From repo root: **`./start.sh`** or `docker compose up --build`.
-
-3. Open **[http://localhost:8080/](http://localhost:8080/)** → create a **project** → **Validation** tab → select schema version and PDF (schemas must exist in DB; see [`docs/VALIDATION_ENGINE.md`](docs/VALIDATION_ENGINE.md)).
-
-## Local backend (no Docker)
-
-Python **3.11+**.
+- Docker Desktop (Compose v2)
+- [Ollama](https://ollama.com) on the host (optional but recommended for schema agent and LLM-assisted extraction):
 
 ```bash
-cd backend && python3 -m venv .venv && source .venv/bin/activate
-pip install -U pip setuptools wheel
-pip install -e ".[dev]"
-pytest -q
+ollama pull gemma4:e4b
+```
+
+### 2. Start the stack
+
+```bash
+git clone git@github.com:Maximiliano-Villanueva/ocean-reader.git
+cd ocean-reader
+cp .env.example .env
+./start.sh
+```
+
+App URL: **http://localhost:8080/** (set `GATEWAY_HTTP_PORT` in `.env` to change).
+
+| URL | Purpose |
+|-----|---------|
+| http://localhost:8080/ | Web UI |
+| http://localhost:8080/docs | OpenAPI (Swagger) |
+| http://localhost:8080/logs | Container logs viewer |
+| http://127.0.0.1:5050/ | pgAdmin (credentials in `.env.example`) |
+| `postgresql://ocean:ocean@127.0.0.1:15432/ocean_read` | Postgres from host |
+
+### 3. Use the product
+
+1. Create a **workspace**.
+2. Open **Checklists** → create or publish a checklist version.
+3. **Validate** → upload PDFs, add tags if needed, run batch validation.
+4. Open results from **History** or aggregate them in **Insights**.
+
+Primary API endpoint: `POST /api/validate-document` (multipart: `project_id`, `schema_id`, `schema_version`, `document`, optional `attributes` JSON).
+
+## Development
+
+### Backend
+
+```bash
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,docling]"
 export DATABASE_URL=postgresql+asyncpg://ocean:ocean@127.0.0.1:15432/ocean_read
 alembic upgrade head
-uvicorn ocean_read.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn ocean_read.main:app --reload --port 8000
 ```
+
+### Frontend
 
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
-## Repo layout
+### Tests
 
-- `backend/` — FastAPI app package `ocean_read/`
-- `frontend/` — Vite + React (`ProjectValidationPage`, projects)
-- `docs/` — architecture and onboarding
-- `infra/` — Traefik, optional gateway-auth, optional Airflow profile (not used by validation core)
+```bash
+cd backend && pytest -q
+```
+
+Regenerate invoice test PDFs (synthetic data, no PII):
+
+```bash
+cd backend && uv run python tests/fixtures/invoice/generate_invoice_fixtures.py
+```
+
+## Documentation
+
+| Document | Audience |
+|----------|----------|
+| **[`docs/ONBOARDING.md`](docs/ONBOARDING.md)** | Start here |
+| [`CONTEXT.md`](CONTEXT.md) | Domain vocabulary |
+| [`docs/implementation/ARCHITECTURE.md`](docs/implementation/ARCHITECTURE.md) | System design |
+| [`docs/implementation/DOCKER.md`](docs/implementation/DOCKER.md) | Compose and env |
+| [`docs/implementation/TESTING.md`](docs/implementation/TESTING.md) | pytest layout |
+| [`AGENTS.md`](AGENTS.md) | Guidance for AI coding agents |
+
+## Repository layout
+
+```
+backend/          FastAPI app (ocean_read/)
+frontend/         Vite + React SPA
+schema_agent/     Optional ADK schema authoring service
+docs/             Architecture, domain specs, onboarding
+infra/            Traefik, gateway-auth
+scripts/          Dev helpers and E2E runners
+```
+
+## Reset / maintenance
+
+```bash
+docker compose down -v          # destroy DB + upload volumes
+./scripts/empty_dev_database.sh   # clear validation rows, keep volumes
+```
 
 ## Notes
 
-- Legacy **RAG/chat/ingestion** code paths were **removed**; Postgres may still contain old tables until you run a dedicated cleanup migration.
-- **`EMBEDDING_DIMENSION`** must stay aligned with Alembic/pgvector definitions for the historical `chunks` table.
+- Legacy RAG/chat features were removed; the product is validation-first.
+- Test fixtures use **synthetic** invoice and lab-report PDFs under `backend/tests/fixtures/`.
+- Persona UX screenshots under `docs/personas/captures/` are local-only (gitignored).

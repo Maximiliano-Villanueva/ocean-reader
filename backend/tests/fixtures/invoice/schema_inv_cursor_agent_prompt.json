@@ -1,0 +1,89 @@
+{
+  "version": "3",
+  "fields": {
+    "recipient_email": {
+      "type": "string",
+      "required": true,
+      "aliases": [
+        "correo electr\u00f3nico",
+        "email del destinatario",
+        "email"
+      ],
+      "semantic_role": "recipient",
+      "on_ambiguity": "best_match",
+      "regex_hint": "(?i)ap\\.demo@acme\\-supply\\.test",
+      "extraction_hint": "Bill-to / Facturar a recipient only \u2014 ignore issuer contact emails."
+    },
+    "invoice_number": {
+      "type": "string",
+      "required": true,
+      "aliases": [
+        "n\u00famero de factura",
+        "invoice number"
+      ],
+      "semantic_role": "document_identifier",
+      "on_ambiguity": "first",
+      "llm_fallback": true,
+      "llm_only": true,
+      "extraction_hint": "Extract the unique invoice identifier using document context."
+    },
+    "issue_date": {
+      "type": "date",
+      "required": true,
+      "aliases": [
+        "fecha de emisi\u00f3n",
+        "fecha de emision"
+      ],
+      "semantic_role": "issue_date",
+      "llm_fallback": true,
+      "regex_hint": "(?i)(?:fecha\\s*de\\s*emisi[o\u00f3]n|issue\\s*date)\\s*[:=\\s]*(\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4}|\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4})"
+    },
+    "due_date": {
+      "type": "date",
+      "required": true,
+      "aliases": [
+        "fecha de vencimiento",
+        "due date"
+      ],
+      "semantic_role": "due_date",
+      "llm_fallback": true,
+      "regex_hint": "(?i)(?:fecha\\s*de\\s*vencimiento|due\\s*date)\\s*[:=\\s]*(\\d{1,2}\\s+de\\s+\\w+\\s+de\\s+\\d{4}|\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4})"
+    },
+    "total_due": {
+      "type": "number",
+      "required": true,
+      "aliases": [
+        "Total due",
+        "Importe por pagar",
+        "total a pagar"
+      ],
+      "semantic_role": "document_total",
+      "min": 20.0,
+      "max": 20.0,
+      "regex_hint": "(?i)(?:importe\\s*por\\s*pagar|total\\s*due|amount\\s*due)\\s*[:=\\s]*USD?\\s*([\\d,.]+)",
+      "extraction_hint": "Use the amount due / importe por pagar line, not line-item subtotals or unit prices."
+    }
+  },
+  "rules": [
+    "required",
+    "range_validation",
+    "type_check"
+  ],
+  "extraction": {
+    "understand_document": true,
+    "context_pass": "when_needed"
+  },
+  "open_ended": {
+    "recipient_name": {
+      "extract_prompt": "Extract the full name of the invoice recipient (bill-to party)",
+      "informative_only": true,
+      "link_evidence": true
+    },
+    "recipient_address": {
+      "extract_prompt": "Extract the full postal address of the invoice recipient",
+      "informative_only": true,
+      "link_evidence": true
+    }
+  },
+  "cross_field_rules": []
+}

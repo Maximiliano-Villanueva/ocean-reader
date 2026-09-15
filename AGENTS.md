@@ -5,3 +5,5 @@ Human and AI contributors should start with **[`docs/ONBOARDING.md`](docs/ONBOAR
 **Docker default app URL:** **`http://localhost:8080/`** (override with **`GATEWAY_HTTP_PORT`** in `.env`).
 
 When changing behavior: run **`pytest`** in `backend/` (see [`docs/TESTING.md`](docs/TESTING.md)) when Python changes; keep routers thin and push rules into **`ocean_read/domain/`** or application services.
+
+**Schema authoring agent:** separate ADK service in [`schema_agent/`](schema_agent/AGENTS.md); vLLM via compose profile `llm`. See [`docs/implementation/SCHEMA_AGENT.md`](docs/implementation/SCHEMA_AGENT.md) and ADR 004.

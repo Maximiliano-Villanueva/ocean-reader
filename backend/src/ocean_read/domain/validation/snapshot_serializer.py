@@ -91,17 +91,21 @@ def serialize_pipeline_snapshots(
     field_map: dict[str, FieldEntry],
     inconsistency: InconsistencyReport,
     resolved_document: dict[str, Any],
+    extraction_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-serializable dict for ``validation_runs.snapshots``."""
 
     ordered_field_map = {k: _field_entry_to_dict(field_map[k]) for k in sorted(field_map.keys())}
-    return {
+    out: dict[str, Any] = {
         "blocks": [_block_to_dict(b) for b in blocks],
         "candidates": [_candidate_to_dict(c) for c in candidates],
         "field_candidate_map": ordered_field_map,
         "inconsistency_report": _inconsistency_to_dict(inconsistency),
         "resolved_document": _json_safe(resolved_document),
     }
+    if extraction_meta:
+        out["extraction_meta"] = _json_safe(extraction_meta)
+    return out
 
 
 def deserialize_pipeline_snapshots(raw: dict[str, Any] | None) -> dict[str, Any]:

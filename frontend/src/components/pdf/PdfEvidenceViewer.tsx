@@ -1,5 +1,6 @@
 /**
  * PDF.js viewer with bbox overlays for validation evidence (replaces plain iframe).
+ * Page width follows the container so the viewer never overflows a sidebar column.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,8 +38,22 @@ export default function PdfEvidenceViewer({
   const [numPages, setNumPages] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [viewports, setViewports] = useState<Record<number, PageViewport>>({});
+  const [pageWidth, setPageWidth] = useState<number | undefined>(undefined);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const scale = 1.25;
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const sync = () => {
+      const w = Math.floor(el.clientWidth - 4);
+      if (w > 120) setPageWidth(w);
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!activeHighlightId) return;
@@ -53,10 +68,16 @@ export default function PdfEvidenceViewer({
     setViewports({});
   }, []);
 
-  const registerViewport = useCallback((pageNumber: number, pdfPage: { getViewport: PDFPageProxy["getViewport"] }) => {
-    const vp = pdfPage.getViewport({ scale });
-    setViewports((prev) => ({ ...prev, [pageNumber]: vp }));
-  }, []);
+  const registerViewport = useCallback(
+    (pageNumber: number, pdfPage: { getViewport: PDFPageProxy["getViewport"] }) => {
+      if (!pageWidth) return;
+      const base = pdfPage.getViewport({ scale: 1 });
+      const scale = pageWidth / base.width;
+      const vp = pdfPage.getViewport({ scale });
+      setViewports((prev) => ({ ...prev, [pageNumber]: vp }));
+    },
+    [pageWidth],
+  );
 
   const pagesToShow = useMemo(() => {
     if (numPages > 0) {
@@ -86,7 +107,7 @@ export default function PdfEvidenceViewer({
         )}
       </p>
       {loadError ? <p className="alert-error">{loadError}</p> : null}
-      <div className="pdf-evidence-scroll">
+      <div className="pdf-evidence-scroll" ref={scrollRef}>
         <Document
           file={file}
           onLoadSuccess={onDocumentLoadSuccess}
@@ -108,13 +129,18 @@ export default function PdfEvidenceViewer({
               >
                 <p className="pdf-evidence-page-label muted small">Page {pageNumber}</p>
                 <div className="pdf-evidence-page-inner">
-                  <Page
-                    pageNumber={pageNumber}
-                    scale={scale}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    onLoadSuccess={(pdfPage) => registerViewport(pageNumber, pdfPage)}
-                  />
+                  {pageWidth ? (
+                    <Page
+                      key={`${pageNumber}-${pageWidth}`}
+                      pageNumber={pageNumber}
+                      width={pageWidth}
+                      renderTextLayer={false}
+                      renderAnnotationLayer={false}
+                      onLoadSuccess={(pdfPage) => registerViewport(pageNumber, pdfPage)}
+                    />
+                  ) : (
+                    <p className="muted small">Preparing viewer…</p>
+                  )}
                   {vp && pageHighlights.length > 0 ? (
                     <div
                       className="pdf-highlight-layer"
@@ -152,4 +178,3 @@ export default function PdfEvidenceViewer({
     </div>
   );
 }
-

@@ -56,6 +56,36 @@ def test_extract_group_list_rows() -> None:
     assert rows[0]["measured_value"] == 105.0
 
 
+def test_extract_group_list_rows_from_docling_glued_blob() -> None:
+    """Docling may glue section header and rows into one block without newlines."""
+
+    spec = {
+        "section_hint": "Test Results",
+        "structure_hint": "list",
+        "row_fields": {
+            "parameter": {"type": "string"},
+            "measured_value": {"type": "number"},
+            "lower_bound": {"type": "number"},
+            "upper_bound": {"type": "number"},
+        },
+    }
+    blocks = [
+        TextBlock(
+            id="b0",
+            page=1,
+            bbox=(0, 0, 1, 1),
+            text=(
+                "Wine QA Report pH: 3.5 Alcohol: 12% Quality: 7 "
+                "Test Results GoodRow 10 0 100 BadRow 200 0 100"
+            ),
+        )
+    ]
+    rows = extract_group_rows(blocks, "test_results", spec)
+    assert len(rows) == 2
+    assert rows[0]["parameter"] == "GoodRow"
+    assert rows[1]["measured_value"] == 200.0
+
+
 def test_extract_group_explicit_table_uses_bbox_spans() -> None:
     """With ``structure_hint: table``, span-level blocks in the section yield rows without pipes."""
 

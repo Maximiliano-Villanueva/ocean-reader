@@ -6,6 +6,7 @@ Requires PostgreSQL with migrations applied (``DATABASE_URL`` / default Compose 
 from __future__ import annotations
 
 import io
+import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -301,3 +302,45 @@ async def test_post_project_seeds_wine_quality_schema(validation_api_seed: dict)
         assert any(v["version_label"] == "1.0" and v["status"] == "active" for v in wq["versions"])
         rd = await client.delete(f"/api/projects/{pid}")
         assert rd.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_validate_schema_body_draft(validation_api_seed: dict) -> None:
+    """Schema Studio DSL check without persisting a version."""
+
+    pid = validation_api_seed["project_id"]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.post(
+            f"/api/projects/{pid}/validation-schemas/validate-body",
+            json={"body": {"version": "3", "fields": {}, "rules": []}},
+        )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "ok" in data
+    assert "normalized_body" in data
+
+
+@pytest.mark.asyncio
+async def test_preview_validation_draft_no_persist(validation_api_seed: dict) -> None:
+    """Temporary pipeline run for schema authoring (no validation_runs row)."""
+
+    pid = validation_api_seed["project_id"]
+    pdf = _wine_pdf_bytes(alcohol_line="Alcohol: 12%")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        groups = await client.get(f"/api/projects/{pid}/validation-schemas")
+        assert groups.status_code == 200
+        wq = next(g for g in groups.json() if g["schema_key"] == "wine_quality")
+        row_id = next(v["id"] for v in wq["versions"] if v["version_label"] == "1.0")
+        detail = await client.get(f"/api/projects/{pid}/validation-schemas/{row_id}")
+        body = detail.json()["body"]
+        r = await client.post(
+            f"/api/projects/{pid}/validation-schemas/preview",
+            data={"schema_body": json.dumps(body)},
+            files={"document": ("lab.pdf", io.BytesIO(pdf), "application/pdf")},
+        )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["dsl_ok"] is True
+    assert data["validation"] is not None
+    assert data["validation"]["schema_id"] == "preview"
+    assert data["validation"]["status"] in ("PASS", "FAIL", "AMBIGUOUS")

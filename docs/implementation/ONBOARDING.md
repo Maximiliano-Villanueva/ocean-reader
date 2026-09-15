@@ -20,6 +20,7 @@ A **deterministic document validation engine**: PDF in → extracted fields → 
 | Schema persistence | `ocean_read/infrastructure/persistence/validation_schema_sqlalchemy.py` |
 | HTTP API | `ocean_read/api/routers/validation.py`, `workspace.py` |
 | UI | `frontend/src/pages/ProjectValidationPage.tsx`, `frontend/src/api.ts` |
+| Schema agent + open-ended DSL | [`SCHEMA_AGENT.md`](SCHEMA_AGENT.md), `schema_agent/AGENTS.md`, ADR 004 |
 | Product direction | [`adr/001-validation-engine-pivot.md`](adr/001-validation-engine-pivot.md) |
 | Milestone tracking | [`../project_management/MILESTONES.md`](../project_management/MILESTONES.md), [`../project_management/M1_CHECKLIST.md`](../project_management/M1_CHECKLIST.md) |
 

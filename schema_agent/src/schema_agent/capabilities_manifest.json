@@ -1,0 +1,21 @@
+{
+  "dsl_versions": ["1", "2", "3"],
+  "strict_field_types": ["number", "string", "date"],
+  "global_rules": ["required", "range_validation", "type_check"],
+  "m3_features": {
+    "cross_field_rules": {"requires_version": "2"},
+    "groups": {"requires_version": "2", "structure_hints": ["table", "list", "sections"]}
+  },
+  "open_ended": {
+    "requires_version": "3",
+    "fields_key": "open_ended",
+    "properties": {
+      "extract_prompt": "required",
+      "evaluate_prompt": "required unless informative_only",
+      "informative_only": "optional",
+      "link_evidence": "optional boolean",
+      "evaluation_tags": ["pass", "fail", "ambiguous"],
+      "depends_on_fields": "optional list of strict field names"
+    }
+  }
+}

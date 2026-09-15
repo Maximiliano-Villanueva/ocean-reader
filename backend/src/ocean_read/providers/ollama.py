@@ -138,6 +138,18 @@ class OllamaLLMClient:
             payload["system"] = system_prompt.strip()
         return await self._generate(payload)
 
+    async def chat_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.2,
+    ) -> dict[str, Any] | list[Any]:
+        """Generate and parse a JSON object or array from the model reply."""
+
+        raw = await self.complete(system, user, temperature=temperature)
+        return loads_json_maybe_with_fence(raw)
+
     async def _generate(self, payload: dict[str, Any]) -> str:
         r = await self._client.post("/api/generate", json=payload)
         if r.status_code >= 400:

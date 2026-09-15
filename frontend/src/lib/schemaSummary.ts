@@ -26,18 +26,28 @@ export type SchemaGroupSummary = {
   rowRuleCount: number;
 };
 
+export type SchemaOpenEndedSummary = {
+  name: string;
+  informativeOnly: boolean;
+  linkEvidence: boolean;
+  hasEvaluate: boolean;
+  dependsOn: string[];
+  extractPreview: string;
+};
+
 export type SchemaBodySummary = {
   version: string;
   fields: SchemaFieldSummary[];
   rules: string[];
   crossFieldRules: SchemaCrossFieldSummary[];
   groups: SchemaGroupSummary[];
+  openEnded: SchemaOpenEndedSummary[];
 };
 
 /** Parse a schema body object into display-friendly structures (tolerant of partial JSON). */
 export function summarizeSchemaBody(body: Record<string, unknown> | null | undefined): SchemaBodySummary {
   if (!body || typeof body !== "object") {
-    return { version: "1", fields: [], rules: [], crossFieldRules: [], groups: [] };
+    return { version: "1", fields: [], rules: [], crossFieldRules: [], groups: [], openEnded: [] };
   }
 
   const version = typeof body.version === "string" ? body.version : String(body.version ?? "1");
@@ -99,7 +109,26 @@ export function summarizeSchemaBody(body: Record<string, unknown> | null | undef
     }
   }
 
-  return { version, fields, rules, crossFieldRules, groups };
+  const openEnded: SchemaOpenEndedSummary[] = [];
+  const oeSpec = body.open_ended;
+  if (oeSpec && typeof oeSpec === "object" && !Array.isArray(oeSpec)) {
+    for (const [name, spec] of Object.entries(oeSpec)) {
+      if (!spec || typeof spec !== "object") continue;
+      const o = spec as Record<string, unknown>;
+      const extract = String(o.extract_prompt ?? "");
+      openEnded.push({
+        name,
+        informativeOnly: Boolean(o.informative_only),
+        linkEvidence: Boolean(o.link_evidence),
+        hasEvaluate: Boolean(String(o.evaluate_prompt ?? "").trim()),
+        dependsOn: Array.isArray(o.depends_on_fields) ? o.depends_on_fields.map(String) : [],
+        extractPreview: extract.length > 80 ? `${extract.slice(0, 80)}…` : extract,
+      });
+    }
+  }
+  openEnded.sort((a, b) => a.name.localeCompare(b.name));
+
+  return { version, fields, rules, crossFieldRules, groups, openEnded };
 }
 
 /** Try parsing editor text; returns ``null`` on invalid JSON. */

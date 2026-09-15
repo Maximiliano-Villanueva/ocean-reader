@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api, type Project } from "../api";
+import { dedupeWorkspacesByName } from "../lib/workspaceList";
 
 /** Matches corpus API tests (`tests/api/test_documents_router.py`); never show in workspace. */
 const PYTEST_PROJECT_PREFIX = "__ocean_pytest__";
@@ -9,7 +10,7 @@ const PYTEST_PROJECT_PREFIX = "__ocean_pytest__";
 export default function ProjectsPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState<Project[]>([]);
-  const [name, setName] = useState("New project");
+  const [name, setName] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -24,15 +25,20 @@ export default function ProjectsPage() {
     });
   }, [load]);
 
-  const workspaceProjects = items.filter((p) => !p.name.startsWith(PYTEST_PROJECT_PREFIX));
+  const workspaceProjects = dedupeWorkspacesByName(
+    items.filter((p) => !p.name.startsWith(PYTEST_PROJECT_PREFIX)),
+  );
 
   return (
     <div className="page project-route-page">
       <header className="route-header route-header-stack">
         <div>
-          <p className="route-kicker">Workspace</p>
-          <h1 className="route-title">Projects</h1>
-          <p className="route-lede muted">Create a project, then pick a section from the tab bar inside it.</p>
+          <p className="route-kicker">Workspaces</p>
+          <h1 className="route-title">Your workspaces</h1>
+          <p className="route-lede muted">
+            Extract and validate data from supplier PDFs — with pinpoint evidence on every field for QC, AP, and
+            audits.
+          </p>
         </div>
       </header>
       {actionError ? (
@@ -40,15 +46,20 @@ export default function ProjectsPage() {
           {actionError}
         </p>
       ) : null}
-      <div className="row">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Project name" />
+      <div className="workspace-create-row">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Riverbank QC Lab"
+        />
         <button
           type="button"
           className="btn-primary-lg"
+          disabled={!name.trim()}
           onClick={async () => {
             try {
               setActionError(null);
-              const p = await api.projects.create(name);
+              const p = await api.projects.create(name.trim());
               await load();
               navigate(`/projects/${p.id}`);
             } catch (e: unknown) {
@@ -57,7 +68,7 @@ export default function ProjectsPage() {
             }
           }}
         >
-          Create project
+          Create workspace
         </button>
         <button
           type="button"
@@ -77,33 +88,35 @@ export default function ProjectsPage() {
           {workspaceProjects.map((p) => (
             <li key={p.id} className="project-catalog-item">
               <Link className="project-tile" to={`/projects/${p.id}`}>
-                {p.name}
+                <span className="project-tile-name">{p.name}</span>
+                <span className="project-tile-cta">Open workspace →</span>
               </Link>
               <button
                 type="button"
-                className="danger"
-                aria-label={`Delete ${p.name}`}
-                onClick={async () => {
-                  if (!confirm("Delete project?")) return;
+                className="project-tile-delete"
+                aria-label={`Remove workspace ${p.name}`}
+                onClick={async (e) => {
+                  e.preventDefault();
+                  if (!confirm(`Remove workspace “${p.name}”? This cannot be undone.`)) return;
                   try {
                     setActionError(null);
                     await api.projects.delete(p.id);
                     await load();
-                  } catch (e: unknown) {
-                    console.error(e);
-                    setActionError(e instanceof Error ? e.message : "Delete failed");
+                  } catch (err: unknown) {
+                    console.error(err);
+                    setActionError(err instanceof Error ? err.message : "Remove failed");
                   }
                 }}
               >
-                Delete
+                Remove
               </button>
             </li>
           ))}
         </ul>
       ) : (
         <div className="empty-panel">
-          <p className="empty-panel-title">No projects yet</p>
-          <p className="muted small">Create one above to open the Overview dashboard.</p>
+          <p className="empty-panel-title">No workspaces yet</p>
+          <p className="muted small">Create one above — e.g. your lab name — then add a document checklist.</p>
         </div>
       )}
     </div>

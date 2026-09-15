@@ -24,3 +24,38 @@ def test_ensemble_resolves_wine_fields_with_evidence() -> None:
     assert evidence["alcohol"]["block_id"] == "b0"
     assert evidence["alcohol"]["page"] == 2
     assert "bbox" in evidence["alcohol"]
+
+
+def test_layout_wine_ignores_trailing_numbers_on_docling_glued_blob() -> None:
+    """Docling often emits one block without newlines; layout must not pick Quality's value for Alcohol."""
+
+    blocks = [
+        TextBlock(
+            id="b1",
+            page=1,
+            bbox=(72.0, 64.0, 400.0, 200.0),
+            text=(
+                "Header · Página 1 de 2 · billing table USD20.00 "
+                "SECTION: Chemical Analysis pH: 3.51 Alcohol: 9.4% Quality: 5"
+            ),
+        ),
+    ]
+    candidates = ensemble_wine_extractors(blocks)
+    resolved, _ = resolve_document_with_evidence(candidates)
+    assert resolved["alcohol"] == 9.4
+    assert resolved["quality"] == 5.0
+
+
+def test_regex_wine_emits_all_matches_in_glued_docling_blob() -> None:
+    """Duplicate labels in one Docling block must surface as multiple candidates."""
+
+    blocks = [
+        TextBlock(
+            id="b1",
+            page=1,
+            bbox=(72.0, 64.0, 400.0, 200.0),
+            text="SECTION: Chemical Analysis pH: 3.1 Alcohol: 12% Quality: 7 pH: 4.2",
+        ),
+    ]
+    ph_vals = sorted(c.value for c in ensemble_wine_extractors(blocks) if c.field == "ph" and c.source == "regex")
+    assert ph_vals == [3.1, 4.2]

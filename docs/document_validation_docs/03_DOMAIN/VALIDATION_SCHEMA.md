@@ -36,6 +36,47 @@ Schemas are versioned and managed by the Schema Management bounded context. See 
 | `rules` | yes | List of rule IDs to apply globally (e.g. `"required"`, `"range_validation"`) |
 | `cross_field_rules` | no | Rules involving multiple fields (Milestone 3) |
 | `groups` | no | Repeating group definitions (Milestone 3) |
+| `open_ended` | no | LLM-driven fields (DSL version **3** only) — see below |
+
+---
+
+## Open-ended fields (version 3)
+
+Top-level map `open_ended` for extraction/validation the strict engine cannot express. Strict `fields` are still validated only by the deterministic rule engine.
+
+```json
+{
+  "version": "3",
+  "fields": { "ph": { "type": "number", "required": true } },
+  "rules": ["required", "range_validation", "type_check"],
+  "open_ended": {
+    "executive_summary": {
+      "extract_prompt": "Two-sentence summary of the lab report",
+      "informative_only": true,
+      "link_evidence": false
+    },
+    "conclusion_vs_metrics": {
+      "extract_prompt": "Paragraph stating final quality conclusion",
+      "evaluate_prompt": "Given strict ph and alcohol, does the conclusion align? Reply pass/fail/ambiguous.",
+      "informative_only": false,
+      "link_evidence": true,
+      "evaluation_tags": ["pass", "fail", "ambiguous"],
+      "depends_on_fields": ["ph", "alcohol"]
+    }
+  }
+}
+```
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `extract_prompt` | yes | NL instruction; pipeline uses `pdf_blocks` text |
+| `evaluate_prompt` | if not informative | NL evaluation; LLM must return pass/fail/ambiguous |
+| `informative_only` | no | When true, no impact on PASS/FAIL |
+| `link_evidence` | no | When true, attach bbox evidence from matching block quotes |
+| `evaluation_tags` | no | Subset of pass/fail/ambiguous (default: all three) |
+| `depends_on_fields` | no | Strict field names injected into evaluation context |
+
+Authoring: conversational **schema agent** (Google ADK + vLLM) in the Schemas UI for **new keys and revisions** (assistant-first). See ADR 004 and `docs/implementation/SCHEMA_AGENT.md`.
 
 ---
 

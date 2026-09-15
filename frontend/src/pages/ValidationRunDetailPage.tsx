@@ -1,23 +1,31 @@
+/**
+ * Validation run detail: field extraction table + PDF evidence (user-friendly layout).
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, type ValidationRunDetailOut, type ValidationEvidenceOut } from "../api";
 import PdfEvidenceViewer from "../components/pdf/PdfEvidenceViewer";
+import RunExportActions from "../components/validation/RunExportActions";
+import RunFieldCorrectionEditor from "../components/validation/RunFieldCorrectionEditor";
+import { formatRunTimestamp } from "../lib/formatDate";
+import { formatSchemaKey } from "../lib/displayLabels";
+import RunFieldExtractionTable from "../components/validation/RunFieldExtractionTable";
+import RunOpenEndedTable from "../components/validation/RunOpenEndedTable";
+import RunSchemaOverview from "../components/validation/RunSchemaOverview";
+import { api, type ValidationRunDetailOut } from "../api";
 import {
+  highlightsFromOpenEnded,
   highlightsFromPipelineSnapshot,
   highlightsFromReport,
   mergeHighlights,
+  refineReportHighlightsWithBlocks,
   type PdfHighlight,
+  type PipelineBlock,
+  type PipelineCandidate,
 } from "../lib/evidenceHighlights";
+import { buildRunFieldRows } from "../lib/runFieldRows";
 import { describeValidationRule, outcomeSummary } from "../lib/ruleDescriptions";
-
-function formatJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
 
 export default function ValidationRunDetailPage() {
   const { projectId = "", runId = "" } = useParams();
@@ -25,8 +33,11 @@ export default function ValidationRunDetailPage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [candidates, setCandidates] = useState<PipelineCandidate[]>([]);
+  const [blocks, setBlocks] = useState<PipelineBlock[]>([]);
   const [snapshotHighlights, setSnapshotHighlights] = useState<PdfHighlight[]>([]);
   const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
+  const [correctionMode, setCorrectionMode] = useState(false);
 
   useEffect(() => {
     if (!projectId || !runId) return;
@@ -66,17 +77,21 @@ export default function ValidationRunDetailPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const [candidates, blocks] = await Promise.all([
+        const [cands, blocks] = await Promise.all([
           api.validation.fetchRunCandidates(projectId, runId),
           api.validation.fetchRunBlocks(projectId, runId),
         ]);
         if (!cancelled) {
-          setSnapshotHighlights(
-            highlightsFromPipelineSnapshot(run.report, candidates, blocks),
-          );
+          setCandidates(cands);
+          setBlocks(blocks);
+          setSnapshotHighlights(highlightsFromPipelineSnapshot(run.report, cands, blocks));
         }
       } catch {
-        if (!cancelled) setSnapshotHighlights([]);
+        if (!cancelled) {
+          setCandidates([]);
+          setBlocks([]);
+          setSnapshotHighlights([]);
+        }
       }
     })();
     return () => {
@@ -84,10 +99,55 @@ export default function ValidationRunDetailPage() {
     };
   }, [projectId, runId, run]);
 
+  const openEndedResults = run?.report.open_ended_results ?? [];
+
   const pdfHighlights = useMemo(() => {
     if (!run) return [] as PdfHighlight[];
-    return mergeHighlights(highlightsFromReport(run.report), snapshotHighlights);
-  }, [run, snapshotHighlights]);
+    const oe = highlightsFromOpenEnded(run.report.open_ended_results);
+    const fromReport = refineReportHighlightsWithBlocks(
+      highlightsFromReport(run.report),
+      blocks,
+      run.report,
+    );
+    return mergeHighlights(mergeHighlights(fromReport, snapshotHighlights), oe);
+  }, [run, snapshotHighlights, blocks]);
+
+  function highlightIdForOpenEnded(field: string, blockId: string, page: number): string | null {
+    const match = pdfHighlights.find(
+      (h) => h.field === field && h.id.includes(blockId) && h.page === page,
+    );
+    return match?.id ?? pdfHighlights.find((h) => h.field === field)?.id ?? null;
+  }
+
+  const fieldRows = useMemo(() => {
+    if (!run) return [];
+    return buildRunFieldRows(run.report.schema_snapshot ?? null, run.report, candidates, pdfHighlights);
+  }, [run, candidates, pdfHighlights]);
+
+  const failedRules = useMemo(() => {
+    if (!run) return [];
+    const outcomes = run.report.field_rule_outcomes ?? [];
+    const fromOutcomes = outcomes.filter((o) => !o.passed);
+    if (fromOutcomes.length > 0) return fromOutcomes;
+    return (run.report.results ?? []).map((r) => ({
+      field: r.field,
+      rule: r.rule,
+      passed: false,
+      value: r.value,
+      expected: r.expected,
+      evidence: r.evidence,
+    }));
+  }, [run]);
+
+  function jumpToHighlight(highlightId: string) {
+    setActiveHighlightId(highlightId);
+  }
+
+  function jumpToField(field: string) {
+    const row = fieldRows.find((r) => r.field === field);
+    const id = row?.highlightIds[0] ?? row?.candidates[0]?.highlightId;
+    if (id) setActiveHighlightId(id);
+  }
 
   if (error) {
     return (
@@ -106,56 +166,11 @@ export default function ValidationRunDetailPage() {
   }
 
   const report = run.report;
-  const outcomes = report.field_rule_outcomes ?? [];
-  const hasLedger = outcomes.length > 0;
-  const resolved = report.resolved_values;
-  const snapshot = report.schema_snapshot;
-
-  function jumpToFieldOnPdf(field: string, rule?: string) {
-    const hit =
-      pdfHighlights.find((h) => h.field === field && (rule ? h.rule === rule : true)) ??
-      pdfHighlights.find((h) => h.field === field);
-    if (hit) setActiveHighlightId(hit.id);
-  }
-
-  function evidenceCard(
-    field: string,
-    rule: string,
-    ev: ValidationEvidenceOut,
-    key: string,
-  ) {
-    return (
-      <li key={key} className="validation-error-card evidence-card-clickable">
-        <button type="button" className="evidence-jump-btn" onClick={() => jumpToFieldOnPdf(field, rule)}>
-          <div className="validation-error-title">
-            <strong>{field}</strong>
-            <span className="muted"> · {describeValidationRule(rule)}</span>
-            <span className="muted small"> — show on PDF</span>
-          </div>
-        </button>
-        <dl className="evidence-dl">
-          <dt>Evidence text</dt>
-          <dd>
-            <pre className="evidence-snippet">{ev.text || "—"}</pre>
-          </dd>
-          <dt>Placement</dt>
-          <dd>
-            Block <code>{ev.block_id || "—"}</code> · page {ev.page}
-            {ev.bbox && ev.bbox.length >= 4 ? (
-              <>
-                {" "}
-                · bbox [{ev.bbox.map((n) => n.toFixed(1)).join(", ")}]
-              </>
-            ) : null}
-          </dd>
-        </dl>
-      </li>
-    );
-  }
+  const outcomeClass = `run-outcome-banner run-outcome-banner--${run.outcome.toLowerCase()}`;
 
   return (
     <div className="page project-route-page validation-run-detail-page">
-      <nav className="muted small" aria-label="Back navigation">
+      <nav className="muted small run-detail-nav">
         <Link to={`/projects/${projectId}/validation`}>← Validation history</Link>
       </nav>
 
@@ -163,19 +178,18 @@ export default function ValidationRunDetailPage() {
         <div className="validation-run-lifecycle-banner" role="status">
           <p className="muted small">
             {run.deleted_at
-              ? "This run was removed from the default history (soft-deleted). The record is kept for audit."
-              : "This run is archived and hidden from the default history list."}
+              ? "Removed from default history (audit copy kept)."
+              : "Archived — hidden from default list."}
           </p>
           <button
             type="button"
-            className="btn-secondary"
+            className="btn-secondary btn-sm"
             disabled={lifecycleBusy}
             onClick={async () => {
               setLifecycleBusy(true);
               try {
                 await api.validation.patchRunLifecycle(projectId, runId, { restore: true });
-                const r = await api.validation.getRun(projectId, runId);
-                setRun(r);
+                setRun(await api.validation.getRun(projectId, runId));
               } catch (e: unknown) {
                 setError(e instanceof Error ? e.message : String(e));
               } finally {
@@ -183,267 +197,217 @@ export default function ValidationRunDetailPage() {
               }
             }}
           >
-            Restore to default history
+            Restore to history
           </button>
         </div>
       )}
 
-      <header className="hero-block">
-        <h1 className="hero-title">{run.document_filename}</h1>
-        <p className="hero-sub muted">
-          Run record: schema <code>{run.schema_key}</code> · label {run.version_label}
-        </p>
-        <p className="muted small">
-          Applied for validation: <code>{report.schema_id}</code> · version{" "}
-          <code>{report.schema_version}</code>
-        </p>
-        {run.pdf_hash ? (
-          <p className="muted small">
-            PDF fingerprint: <code className="pdf-hash-code">{run.pdf_hash}</code>
-          </p>
-        ) : null}
-        <p className={`validation-status validation-status-${run.outcome.toLowerCase()}`} role="status">
-          {run.outcome}
-        </p>
-        <p className="muted small">{outcomeSummary(report.status)}</p>
-        {!(run.archived_at || run.deleted_at) ? (
-          <p className="muted small validation-run-detail-lifecycle-actions">
-            <button
-              type="button"
-              className="btn-inline link-button"
-              disabled={lifecycleBusy}
-              onClick={async () => {
-                setLifecycleBusy(true);
-                try {
-                  await api.validation.patchRunLifecycle(projectId, runId, { archived: true });
-                  setRun(await api.validation.getRun(projectId, runId));
-                } catch (e: unknown) {
-                  setError(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setLifecycleBusy(false);
-                }
-              }}
-            >
-              Archive run
-            </button>
-            {" · "}
-            <button
-              type="button"
-              className="btn-inline link-button"
-              disabled={lifecycleBusy}
-              onClick={async () => {
-                if (
-                  !window.confirm(
-                    "Remove this run from the default history? You can show hidden runs and restore it later.",
-                  )
-                ) {
-                  return;
-                }
-                setLifecycleBusy(true);
-                try {
-                  await api.validation.softDeleteRun(projectId, runId);
-                  setRun(await api.validation.getRun(projectId, runId));
-                } catch (e: unknown) {
-                  setError(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setLifecycleBusy(false);
-                }
-              }}
-            >
-              Remove from default history
-            </button>
-          </p>
-        ) : null}
-      </header>
-
-      <div className="validation-result-layout validation-result-layout--detail">
-        <div className="validation-result-main">
-          <section className="validation-detail-section">
-            <h2 className="section-heading">Applied schema (snapshot)</h2>
-            <p className="muted small">
-              Immutable JSON body used for this run. Compare <code>schema_id</code> /{" "}
-              <code>schema_version</code> above with your version list if needed.
-            </p>
-            {snapshot && Object.keys(snapshot).length > 0 ? (
-              <details open>
-                <summary className="muted small">Schema definition</summary>
-                <pre className="schema-json-view" role="region" aria-label="Applied schema JSON">
-                  {formatJson(snapshot)}
-                </pre>
-              </details>
-            ) : (
+      <div className="run-detail-layout">
+        <div className="run-detail-main">
+          <header className="run-detail-header">
+            <div className="run-detail-header-main">
+              <h1 className="run-detail-title">{run.document_filename}</h1>
               <p className="muted small">
-                No schema snapshot stored for this run (older history rows only store summary metadata).
+                {formatSchemaKey(run.schema_key)} · version {run.version_label}
+                {run.revision_number && run.revision_number > 1 ? ` · revision ${run.revision_number}` : ""}
+                {run.created_at ? ` · ${formatRunTimestamp(run.created_at)}` : ""}
               </p>
+              {run.parent_run_id ? (
+                <p className="muted small">
+                  Corrected from{" "}
+                  <Link to={`/projects/${projectId}/validation/runs/${run.parent_run_id}`}>previous run</Link>
+                </p>
+              ) : null}
+            </div>
+            <div className={outcomeClass} role="status">
+              <span className="run-outcome-label">{run.outcome}</span>
+              <span className="run-outcome-desc muted small">{outcomeSummary(report.status)}</span>
+            </div>
+          </header>
+
+          {run.outcome === "FAIL" ? (
+            <p className="run-outcome-explainer run-outcome-explainer--fail" role="note">
+              <strong>Failed</strong> — at least one required field is missing, out of range, or breaks a checklist rule.
+              Review the table below and use <em>View →</em> on each row to jump to evidence on the PDF.
+            </p>
+          ) : null}
+
+          {run.outcome === "AMBIGUOUS" ? (
+            <p className="run-outcome-explainer run-outcome-explainer--ambiguous" role="note">
+              <strong>Needs review</strong> — conflicting readings were found for one or more fields. Compare candidates
+              in the table and on the PDF before approving.
+            </p>
+          ) : null}
+
+          {report.extraction_meta?.vision_fallback_used === true && (
+            <p className="validation-run-vision-banner muted small" role="note">
+              This run used <strong>vision extraction</strong>: page images were sent to the LLM because the PDF had
+              little or no selectable text (common for scans).
+            </p>
+          )}
+
+          <RunExportActions run={run} fieldRows={fieldRows} />
+
+          <section className="run-detail-panel" aria-labelledby="run-fields-heading">
+            <div className="run-detail-panel-head">
+              <h2 id="run-fields-heading" className="section-heading">
+                Extracted fields
+              </h2>
+              {!correctionMode ? (
+                <button
+                  type="button"
+                  className="btn-secondary btn-sm"
+                  disabled={fieldRows.length === 0}
+                  onClick={() => setCorrectionMode(true)}
+                >
+                  Correct values
+                </button>
+              ) : null}
+            </div>
+            <p className="muted small run-detail-panel-hint">
+              Each value is tied to evidence on the PDF. Click a row to highlight the exact source in the document.
+            </p>
+            {correctionMode ? (
+              <RunFieldCorrectionEditor
+                projectId={projectId}
+                runId={runId}
+                revisionNumber={run.revision_number ?? 1}
+                fieldRows={fieldRows}
+                onCancel={() => setCorrectionMode(false)}
+              />
+            ) : (
+              <RunFieldExtractionTable
+                rows={fieldRows}
+                activeHighlightId={activeHighlightId}
+                onJumpToHighlight={jumpToHighlight}
+              />
             )}
           </section>
 
-          <section className="validation-detail-section">
-            <h2 className="section-heading">Extracted values</h2>
-            <p className="muted small">Resolved field values after extraction (when the pipeline reached validation).</p>
-            {resolved && Object.keys(resolved).length > 0 ? (
-              <table className="validation-ledger-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Field</th>
-                    <th scope="col">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(resolved).map(([k, v]) => (
-                    <tr key={k}>
-                      <td>
-                        <code>{k}</code>
-                      </td>
-                      <td>
-                        <code>{formatJson(v)}</code>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="muted small">
-                {report.status === "AMBIGUOUS"
-                  ? "Values were not uniquely resolved — see ambiguous fields below."
-                  : "No resolved values on record for this run (legacy row or pipeline stopped earlier)."}
+          {openEndedResults.length > 0 ? (
+            <section className="run-detail-panel" aria-labelledby="run-open-ended-heading">
+              <h2 id="run-open-ended-heading" className="section-heading">
+                Open-ended (LLM) fields
+              </h2>
+              <p className="muted small run-detail-panel-hint">
+                Prompt-based extraction and evaluation. Informative fields do not change PASS/FAIL.
               </p>
-            )}
-          </section>
+              <RunOpenEndedTable
+                rows={openEndedResults}
+                activeHighlightId={activeHighlightId}
+                onJumpToHighlight={jumpToHighlight}
+                highlightIdForEvidence={highlightIdForOpenEnded}
+              />
+            </section>
+          ) : null}
 
-          <section className="validation-detail-section">
-            <h2 className="section-heading">Rule ledger</h2>
-            <p className="muted small">
-              Every global rule evaluated per field (<code>required</code>, <code>type_check</code>,{" "}
-              <code>range_validation</code>). Includes passes and failures.
-            </p>
-            {report.status === "AMBIGUOUS" && (report.ambiguous_fields?.length ?? 0) > 0 ? (
-              <p className="validation-ambiguous-note">
-                Ambiguous fields:{" "}
-                {(report.ambiguous_fields ?? []).map((a) => `${a.field} (${a.candidate_count} candidates)`).join(", ")}
-              </p>
-            ) : null}
-
-            {hasLedger ? (
-              <div className="validation-ledger-wrap">
-                <table className="validation-ledger-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Field</th>
-                      <th scope="col">Rule</th>
-                      <th scope="col">Result</th>
-                      <th scope="col">Extracted</th>
-                      <th scope="col">Expected</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {outcomes.map((o, i) => (
-                      <tr key={`${o.field}-${o.rule}-${i}`}>
-                        <td>
-                          <code>{o.field}</code>
-                        </td>
-                        <td>
-                          <span className="muted">{describeValidationRule(o.rule)}</span>
-                          <br />
-                          <code className="muted small">{o.rule}</code>
-                        </td>
-                        <td>
-                          <span
-                            className={`validation-file-queue-badge ${
-                              o.passed ? "validation-file-queue-badge--pass" : "validation-file-queue-badge--fail"
-                            }`}
-                          >
-                            {o.passed ? "Pass" : "Fail"}
-                          </span>
-                        </td>
-                        <td>
-                          <code>{o.value === undefined || o.value === null ? "—" : formatJson(o.value)}</code>
-                        </td>
-                        <td>
-                          <code>{o.expected === undefined || o.expected === null ? "—" : formatJson(o.expected)}</code>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {outcomes.some((o) => o.evidence) ? (
-                  <div className="validation-ledger-evidence-block">
-                    <h3 className="section-heading validation-ledger-evidence-heading">Evidence by row</h3>
-                    <ul className="list validation-error-list">
-                      {outcomes.map((o, i) =>
-                        o.evidence ? evidenceCard(o.field, o.rule, o.evidence, `ev-${o.field}-${o.rule}-${i}`) : null,
-                      )}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            ) : report.results.length > 0 ? (
-              <ul className="list validation-error-list">
-                {report.results.map((r) => (
-                  <li key={`${r.field}-${r.rule}`} className="validation-error-card">
-                    <div className="validation-error-title">
-                      <strong>{r.field}</strong>
-                      <span className="muted"> · {describeValidationRule(r.rule)}</span>
-                    </div>
-                    <p className="muted small rule-meta">
-                      Rule code <code>{r.rule}</code> · extracted value: <code>{String(r.value)}</code> · expected:{" "}
-                      <code>{JSON.stringify(r.expected)}</code>
-                    </p>
-                    {r.evidence ? (
-                      <button
-                        type="button"
-                        className="evidence-jump-btn evidence-jump-btn--inline"
-                        onClick={() => jumpToFieldOnPdf(r.field, r.rule)}
-                      >
-                        Show extraction on PDF
-                      </button>
-                    ) : null}
-                    {r.evidence ? (
-                      <dl className="evidence-dl">
-                        <dt>Evidence text</dt>
-                        <dd>
-                          <pre className="evidence-snippet">{r.evidence.text || "—"}</pre>
-                        </dd>
-                        <dt>Placement</dt>
-                        <dd>
-                          Block <code>{r.evidence.block_id || "—"}</code> · page {r.evidence.page}
-                          {r.evidence.bbox && r.evidence.bbox.length >= 4 ? (
-                            <>
-                              {" "}
-                              · bbox [{r.evidence.bbox.map((n) => n.toFixed(1)).join(", ")}]
-                            </>
-                          ) : null}
-                        </dd>
-                      </dl>
-                    ) : null}
+          {failedRules.length > 0 ? (
+            <section className="run-detail-panel" aria-labelledby="run-failures-heading">
+              <h2 id="run-failures-heading" className="section-heading">
+                Rule violations
+              </h2>
+              <ul className="run-failures-list">
+                {failedRules.map((o, i) => (
+                  <li key={`${o.field}-${o.rule}-${i}`}>
+                    <button
+                      type="button"
+                      className="run-failure-chip"
+                      onClick={() => jumpToField(o.field)}
+                    >
+                      <strong>{o.field}</strong>
+                      <span className="muted"> — {describeValidationRule(o.rule)}</span>
+                      <span className="run-failure-jump">Show on PDF →</span>
+                    </button>
                   </li>
                 ))}
               </ul>
-            ) : report.status === "AMBIGUOUS" ? (
+            </section>
+          ) : null}
+
+          <RunSchemaOverview
+            schemaSnapshot={report.schema_snapshot ?? null}
+            schemaKey={run.schema_key}
+            versionLabel={run.version_label}
+          />
+
+          <details className="run-detail-technical">
+            <summary className="muted small">Run metadata</summary>
+            <dl className="run-meta-dl muted small">
+              <dt>Run id</dt>
+              <dd>
+                <code>{run.id}</code>
+              </dd>
+              {run.pdf_hash ? (
+                <>
+                  <dt>PDF fingerprint</dt>
+                  <dd>
+                    <code className="pdf-hash-code">{run.pdf_hash}</code>
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+            {!(run.archived_at || run.deleted_at) ? (
               <p className="muted small">
-                No per-rule ledger on record for this run (older persisted ambiguous runs may omit it).
+                <button
+                  type="button"
+                  className="btn-inline link-button"
+                  disabled={lifecycleBusy}
+                  onClick={async () => {
+                    setLifecycleBusy(true);
+                    try {
+                      await api.validation.patchRunLifecycle(projectId, runId, { archived: true });
+                      setRun(await api.validation.getRun(projectId, runId));
+                    } catch (e: unknown) {
+                      setError(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setLifecycleBusy(false);
+                    }
+                  }}
+                >
+                  Archive
+                </button>
+                {" · "}
+                <button
+                  type="button"
+                  className="btn-inline link-button"
+                  disabled={lifecycleBusy}
+                  onClick={async () => {
+                    if (!window.confirm("Remove from default history?")) return;
+                    setLifecycleBusy(true);
+                    try {
+                      await api.validation.softDeleteRun(projectId, runId);
+                      setRun(await api.validation.getRun(projectId, runId));
+                    } catch (e: unknown) {
+                      setError(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setLifecycleBusy(false);
+                    }
+                  }}
+                >
+                  Remove
+                </button>
               </p>
-            ) : (
-              <p className="muted">
-                No per-rule ledger stored for this run — only the overall outcome is available. Re-validate the
-                document to capture a full pass/fail breakdown.
-              </p>
-            )}
-          </section>
+            ) : null}
+          </details>
         </div>
-        <aside className="validation-pdf-pane" aria-label="PDF replay">
-          {pdfUrl ? (
-            <PdfEvidenceViewer
-              file={pdfUrl}
-              highlights={pdfHighlights}
-              activeHighlightId={activeHighlightId}
-              onHighlightClick={(h) => setActiveHighlightId(h.id)}
-            />
-          ) : run.has_pdf ? (
-            <p className="muted">Loading PDF…</p>
-          ) : (
-            <p className="muted">No PDF was stored for this run.</p>
-          )}
+
+        <aside className="run-detail-pdf-pane" aria-label="Document with highlights">
+          <div className="run-detail-pdf-sticky">
+            <h2 className="section-heading run-detail-pdf-title">Source document</h2>
+            {pdfUrl ? (
+              <PdfEvidenceViewer
+                file={pdfUrl}
+                highlights={pdfHighlights}
+                activeHighlightId={activeHighlightId}
+                onHighlightClick={(h) => setActiveHighlightId(h.id)}
+                className="run-pdf-viewer"
+              />
+            ) : run.has_pdf ? (
+              <p className="muted">Loading PDF…</p>
+            ) : (
+              <p className="muted">No PDF stored for this run.</p>
+            )}
+          </div>
         </aside>
       </div>
     </div>

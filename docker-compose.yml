@@ -129,7 +129,10 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gemma4:e4b}
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-768}
       VALIDATION_LLM_FALLBACK_ENABLED: ${VALIDATION_LLM_FALLBACK_ENABLED:-false}
+      VALIDATION_DOCUMENT_UNDERSTANDING_ENABLED: ${VALIDATION_DOCUMENT_UNDERSTANDING_ENABLED:-true}
       VALIDATION_SCHEMA_LLM_ASSIST_ENABLED: ${VALIDATION_SCHEMA_LLM_ASSIST_ENABLED:-false}
+      VALIDATION_OPEN_ENDED_ENABLED: ${VALIDATION_OPEN_ENDED_ENABLED:-false}
+      SCHEMA_AGENT_URL: ${SCHEMA_AGENT_URL:-http://schema-agent:8081}
       LOG_VIEWER_ENABLED: ${LOG_VIEWER_ENABLED:-true}
       LOG_VIEWER_TOKEN: ${LOG_VIEWER_TOKEN:-}
       COMPOSE_PROJECT_NAME: ocean-read
@@ -153,6 +156,35 @@ services:
       timeout: 5s
       retries: 12
       start_period: 120s
+    networks:
+      edge: {}
+
+  # Schema authoring agent (Ollama on host — gemma4:e4b)
+  schema-agent:
+    build:
+      context: .
+      dockerfile: schema_agent/Dockerfile
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-gemma4:e4b}
+      OCEAN_BACKEND_URL: http://backend:8000
+    expose:
+      - "8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8081/health'', timeout=3)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       edge: {}
 

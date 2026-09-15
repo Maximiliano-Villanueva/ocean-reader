@@ -1,0 +1,31 @@
+{
+  "schema": "schema_invoice_v3.json",
+  "rows": [
+    {
+      "id": "inv_cursor_formatted",
+      "clean_pdf": "inv_cursor_formatted.pdf",
+      "clean_truth": "inv_cursor_formatted.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "inv_clean_001",
+      "clean_pdf": "inv_clean_001.pdf",
+      "clean_truth": "inv_clean_001.json",
+      "expected_status": "PASS",
+      "expected_errors": []
+    },
+    {
+      "id": "inv_fail_total",
+      "clean_pdf": "inv_fail_total.pdf",
+      "clean_truth": "inv_fail_total.json",
+      "expected_status": "FAIL",
+      "expected_errors": [
+        {
+          "field": "total_usd",
+          "rule": "total_matches_line"
+        }
+      ]
+    }
+  ]
+}

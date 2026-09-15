@@ -58,6 +58,8 @@ def _noise_lines() -> str:
 
 
 def _build_pdf(text: str) -> bytes:
+    """Legacy single-page builder — prefer :func:`_build_rich_pdf_from_lines`."""
+
     import fitz
 
     doc = fitz.open()
@@ -69,6 +71,52 @@ def _build_pdf(text: str) -> bytes:
     out = doc.tobytes()
     doc.close()
     return out
+
+
+def _build_rich_pdf_from_lines(lines: list[str], *, noise_extra: str = "") -> bytes:
+    """Map legacy line lists to multi-page rich PDFs (lab section preserved)."""
+
+    from rich_pdf_builder import LabValues, build_rich_wine_pdf
+
+    import re
+
+    lab = LabValues()
+    extra: list[str] = []
+    for line in lines:
+        t = line.strip()
+        if not t or t.startswith("Wine QA Report"):
+            continue
+        if t.startswith("SECTION"):
+            continue
+        m = re.match(r"(?i)p[hH]\s*:\s*([\d.]+)", t)
+        if m:
+            if lab.ph is not None:
+                extra.append(t)
+            else:
+                lab = LabValues(ph=float(m.group(1)), alcohol=lab.alcohol, quality=lab.quality, omit_quality=lab.omit_quality)
+            continue
+        m = re.match(r"(?i)alcohol\s*:\s*([\d.]+)", t)
+        if m:
+            if lab.alcohol is not None:
+                extra.append(t)
+            else:
+                lab = LabValues(ph=lab.ph, alcohol=float(m.group(1)), quality=lab.quality, omit_quality=lab.omit_quality)
+            continue
+        m = re.match(r"(?i)quality\s*:\s*([\d.]+)", t)
+        if m:
+            if lab.quality is not None:
+                extra.append(t)
+            else:
+                lab = LabValues(ph=lab.ph, alcohol=lab.alcohol, quality=int(float(m.group(1))), omit_quality=False)
+            continue
+        if re.search(r"(?i)measured\s+p[hH]|p[hH]\s+level|ph\s+value", t):
+            extra.append(t)
+            continue
+        if "alcohol" in t.lower() and "duplicate" in t.lower():
+            extra.append(t)
+            continue
+        extra.append(t)
+    return build_rich_wine_pdf(lab=lab, extra_lab_lines=extra, noise_extra=noise_extra)
 
 
 def _append_synthetic_corpus(base: Path, specs: list[dict[str, object]]) -> None:
@@ -95,7 +143,7 @@ def _append_synthetic_corpus(base: Path, specs: list[dict[str, object]]) -> None
         row: dict[str, object],
     ) -> None:
         pdf_path = base / rel_pdf
-        pdf_path.write_bytes(_build_pdf("\n".join(lines)))
+        pdf_path.write_bytes(_build_rich_pdf_from_lines(lines))
         truth_path = base / str(row["clean_truth"])
         truth_path.write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
         specs.append(row)
@@ -326,18 +374,20 @@ def main() -> None:
         truth: dict[str, float | int] = {"ph": ph, "alcohol": alcohol}
         if not omit_quality and quality is not None:
             truth["quality"] = quality
-        text_clean = _lab_report_text(ph=ph, alcohol=alcohol, quality=int(quality or 0), omit_quality=omit_quality)
-        text_noisy = _lab_report_text(
+        from rich_pdf_builder import LabValues, build_rich_wine_pdf
+
+        lab = LabValues(
             ph=ph,
             alcohol=alcohol,
-            quality=int(quality or 0),
+            quality=int(quality or 0) if quality is not None else None,
             omit_quality=omit_quality,
-            noise_extra=_noise_lines(),
         )
-        (clean_dir / f"row_{tag}_clean.pdf").write_bytes(_build_pdf(text_clean))
+        (clean_dir / f"row_{tag}_clean.pdf").write_bytes(build_rich_wine_pdf(lab=lab))
         (clean_dir / f"row_{tag}_clean.json").write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
         if noise:
-            (noisy_dir / f"row_{tag}_noisy.pdf").write_bytes(_build_pdf(text_noisy))
+            (noisy_dir / f"row_{tag}_noisy.pdf").write_bytes(
+                build_rich_wine_pdf(lab=lab, noise_extra=_noise_lines())
+            )
             (noisy_dir / f"row_{tag}_noisy.json").write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
         specs.append(
             {
@@ -437,7 +487,7 @@ def write_m3_cross_field_corpus(base: Path) -> None:
         errors: list[dict[str, str]],
     ) -> None:
         rel = f"m3_cross_field/{stem}.pdf"
-        (base / rel).write_bytes(_build_pdf("\n".join(lines)))
+        (base / rel).write_bytes(_build_rich_pdf_from_lines(lines))
         (base / f"m3_cross_field/{stem}.json").write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
         rows.append(
             {
